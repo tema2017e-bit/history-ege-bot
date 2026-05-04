@@ -8,8 +8,9 @@ import { reignClusters } from '../data/reigns';
 import { getNewlyUnlockedAchievements } from '../data/achievements';
 
 // ==================== FREEMIUM ====================
-// Бесплатно доступны первые 3 эпохи (Древняя Русь, Раздробленность, Монгольское иго)
-export const FREE_ERAS_COUNT = 3;
+// Бесплатно доступны первые 5 эпох (Древняя Русь, Раздробленность, Монгольское иго,
+// Образование Московского государства, Царствование Ивана Грозного)
+export const FREE_ERAS_COUNT = 5;
 // Адрес бота (сервер подписок)
 const BOT_API_URL = import.meta.env.VITE_BOT_API_URL || 'https://history-ege-bot.onrender.com';
 

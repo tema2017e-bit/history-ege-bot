@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import HomePage from './pages/HomePage';
 import LessonPage from './pages/LessonPage';
 import ReviewPage from './pages/ReviewPage';
@@ -14,7 +15,7 @@ import TheoryPage from './pages/TheoryPage';
 import DiagnosticPage from './pages/DiagnosticPage';
 import DateMemoryPage from './pages/DateMemoryPage';
 import EndlessPage from './pages/EndlessPage';
-import { useStore, unlockAllEras, lockAllEras } from './store/useStore';
+import { useStore, unlockAllEras, lockAllEras, checkSubscriptionStatus } from './store/useStore';
 import { useTelegram } from './utils/telegram';
 
 // Компонент, проверяющий статус разблокировки через API
@@ -22,6 +23,7 @@ import { useTelegram } from './utils/telegram';
 // Всегда проверяет API при загрузке и синхронизирует unlockedAllByAdmin
 const AdminUnlockHandler: React.FC = () => {
   const tgUser = useStore(state => state.tgUser);
+  const unlockedAllByAdmin = useStore(state => state.unlockedAllByAdmin);
 
   useEffect(() => {
     if (!tgUser?.id) return;
@@ -34,7 +36,8 @@ const AdminUnlockHandler: React.FC = () => {
         const data = await res.json();
         if (data.unlockedAll) {
           unlockAllEras();
-        } else {
+        } else if (unlockedAllByAdmin) {
+          // Если было разблокировано, но API вернул false — блокируем обратно
           lockAllEras();
         }
       } catch (e) {
@@ -46,6 +49,31 @@ const AdminUnlockHandler: React.FC = () => {
   }, [tgUser?.id]);
 
   return null;
+};
+
+// Обработчик URL-параметров (unlock=1, subscribe и т.д.)
+const UrlParamHandler: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const tgUser = useStore(state => state.tgUser);
+
+  useEffect(() => {
+    // Параметр unlock=1 — разблокировать все эпохи
+    if (searchParams.get('unlock') === '1') {
+      unlockAllEras();
+      toast.success('✅ Все эпохи разблокированы!', { duration: 3000 });
+      
+      // Убираем параметр из URL
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [searchParams, tgUser?.id]);
+
+  return null;
+};
+
+// Компонент для проверки подписки
+const SubscriptionCheck: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return <>{children}</>;
 };
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -121,6 +149,7 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <AdminUnlockHandler />
+      <UrlParamHandler />
       <Toaster
         position="top-center"
         toastOptions={{

@@ -7,6 +7,41 @@ import { getTopWeakCards, getFixedCardIds } from '../utils/cardAnalysis';
 import { reignClusters } from '../data/reigns';
 import { getNewlyUnlockedAchievements } from '../data/achievements';
 
+// ==================== FREEMIUM ====================
+// Бесплатно доступны первые 3 эпохи
+export const FREE_ERAS_COUNT = 3;
+// Адрес API сервера подписок (на VPS)
+const SUBSCRIPTION_API_URL = import.meta.env.VITE_SUBSCRIPTION_API_URL || 'https://api.history-ege.ru';
+
+// Получить статус подписки с сервера
+export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Promise<{ subscription: boolean; freeEras: number }> {
+  try {
+    const response = await fetch(`${SUBSCRIPTION_API_URL}/api/subscription-status`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Telegram-Init-Data': getTelegramInitData() || '',
+      },
+    });
+    if (!response.ok) throw new Error('API error');
+    const data = await response.json();
+    return { subscription: data.subscription, freeEras: data.freeEras || FREE_ERAS_COUNT };
+  } catch {
+    // Если сервер недоступен — считаем пользователя без подписки
+    return { subscription: false, freeEras: FREE_ERAS_COUNT };
+  }
+}
+
+// Вспомогательная функция для получения initData Telegram
+function getTelegramInitData(): string | null {
+  try {
+    if (typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initData) {
+      return (window as any).Telegram.WebApp.initData;
+    }
+  } catch {}
+  return null;
+}
+
 // Ключ изменён для принудительного сброса старых битых данных
 const STORAGE_KEY = 'history-ege-state-v3';
 const HEART_RECOVERY_INTERVAL = 30 * 60 * 1000; // 30 минут в мс

@@ -15,37 +15,40 @@ import TheoryPage from './pages/TheoryPage';
 import DiagnosticPage from './pages/DiagnosticPage';
 import DateMemoryPage from './pages/DateMemoryPage';
 import EndlessPage from './pages/EndlessPage';
-import { useStore, unlockAllEras, lockAllEras, checkSubscriptionStatus } from './store/useStore';
+import { useStore, unlockAllEras, checkSubscriptionStatus } from './store/useStore';
 import { useTelegram } from './utils/telegram';
 
-// Компонент, проверяющий статус разблокировки через API
-// Используется ботом для разблокировки всех эпох конкретному пользователю
-// Всегда проверяет API при загрузке и синхронизирует unlockedAllByAdmin
-const AdminUnlockHandler: React.FC = () => {
+// Компонент, проверяющий статус подписки через API бота
+// Если у пользователя есть unlocked_all — разблокирует все эпохи
+// Если подписка закончилась — блокируе обратно
+const SubscriptionHandler: React.FC = () => {
   const tgUser = useStore(state => state.tgUser);
   const unlockedAllByAdmin = useStore(state => state.unlockedAllByAdmin);
 
   useEffect(() => {
     if (!tgUser?.id) return;
 
-    const checkUnlockStatus = async () => {
+    let cancelled = false;
+
+    const checkStatus = async () => {
       try {
-        const res = await fetch(
-          `https://history-ege.vercel.app/api/unlock-status?userId=${tgUser.id}`
-        );
-        const data = await res.json();
-        if (data.unlockedAll) {
+        const result = await checkSubscriptionStatus(tgUser);
+        if (cancelled) return;
+
+        if (result.subscription) {
+          // Пользователь оплатил — разблокируем всё
           unlockAllEras();
-        } else if (unlockedAllByAdmin) {
-          // Если было разблокировано, но API вернул false — блокируем обратно
-          lockAllEras();
         }
+        // Если подписки нет — ничего не делаем,
+        // пользователь всё равно может пользоваться бесплатными эпохами
       } catch (e) {
-        console.error('Failed to check unlock status:', e);
+        console.error('Subscription check failed:', e);
       }
     };
 
-    checkUnlockStatus();
+    checkStatus();
+
+    return () => { cancelled = true; };
   }, [tgUser?.id]);
 
   return null;
@@ -54,10 +57,9 @@ const AdminUnlockHandler: React.FC = () => {
 // Обработчик URL-параметров (unlock=1, subscribe и т.д.)
 const UrlParamHandler: React.FC = () => {
   const [searchParams] = useSearchParams();
-  const tgUser = useStore(state => state.tgUser);
 
   useEffect(() => {
-    // Параметр unlock=1 — разблокировать все эпохи
+    // Параметр unlock=1 — разблокировать все эпохи (для админов)
     if (searchParams.get('unlock') === '1') {
       unlockAllEras();
       toast.success('✅ Все эпохи разблокированы!', { duration: 3000 });
@@ -66,14 +68,9 @@ const UrlParamHandler: React.FC = () => {
       const newUrl = window.location.pathname;
       window.history.replaceState({}, '', newUrl);
     }
-  }, [searchParams, tgUser?.id]);
+  }, [searchParams]);
 
   return null;
-};
-
-// Компонент для проверки подписки
-const SubscriptionCheck: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  return <>{children}</>;
 };
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -91,7 +88,6 @@ const App: React.FC = () => {
   const theme = useStore(state => state.theme);
   const setTheme = useStore(state => state.setTheme);
   const setTgUser = useStore(state => state.setTgUser);
-  const isTelegram = useTelegram();
 
   // Telegram Mini App интеграция
   useEffect(() => {
@@ -148,7 +144,7 @@ const App: React.FC = () => {
 
   return (
     <BrowserRouter>
-      <AdminUnlockHandler />
+      <SubscriptionHandler />
       <UrlParamHandler />
       <Toaster
         position="top-center"

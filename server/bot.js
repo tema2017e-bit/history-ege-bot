@@ -12,6 +12,20 @@ const express = require('express');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
 
+// CORS middleware — чтобы Mini App мог обращаться к API бота
+const corsMiddleware = (req, res, next) => {
+  const origin = req.headers.origin || '*';
+  // Разрешаем Vercel frontend и любые Telegram Mini App
+  res.setHeader('Access-Control-Allow-Origin', origin === 'null' ? '*' : origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+};
+
 const db = require('./src/db');
 
 // ======================== КОНФИГУРАЦИЯ ========================
@@ -673,13 +687,16 @@ async function processUpdate(update) {
 const app = express();
 
 // Парсинг JSON (кроме вебхуков Telegram — они приходят в text/plain)
+app.use('/api', corsMiddleware);
 app.use('/api', express.json());
 app.use('/webhook', express.text({ type: 'text/plain' }));
+app.use('/health', corsMiddleware);
+app.use('/', corsMiddleware);
 
 // ===== API для Mini App =====
 
 // Проверка статуса пользователя (для Mini App)
-app.get('/api/check-access', async (req, res) => {
+app.get('/api/check-access', corsMiddleware, async (req, res) => {
   const chatId = parseInt(req.query.chat_id);
   const secret = req.query.secret;
 

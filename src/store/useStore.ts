@@ -8,24 +8,48 @@ import { reignClusters } from '../data/reigns';
 import { getNewlyUnlockedAchievements } from '../data/achievements';
 
 // ==================== FREEMIUM ====================
-// Бесплатно доступны первые 3 эпохи
+// Бесплатно доступны первые 3 эпохи (Древняя Русь, Раздробленность, Монгольское иго)
 export const FREE_ERAS_COUNT = 3;
-// Адрес API сервера подписок (на VPS)
-const SUBSCRIPTION_API_URL = import.meta.env.VITE_SUBSCRIPTION_API_URL || 'https://api.history-ege.ru';
+// Адрес бота (сервер подписок)
+const BOT_API_URL = import.meta.env.VITE_BOT_API_URL || 'https://history-ege-bot.onrender.com';
 
-// Получить статус подписки с сервера
+// Кеш статуса подписки (на 5 минут)
+let lastSubscriptionCheck = 0;
+let cachedSubscriptionResult: { subscription: boolean; freeEras: number } | null = null;
+
+/**
+ * Получить статус подписки с сервера бота
+ * Проверяет через /api/check-access бота, есть ли у пользователя unlocked_all
+ */
 export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Promise<{ subscription: boolean; freeEras: number }> {
+  const now = Date.now();
+  if (cachedSubscriptionResult && (now - lastSubscriptionCheck) < 5 * 60 * 1000) {
+    return cachedSubscriptionResult;
+  }
+
   try {
-    const response = await fetch(`${SUBSCRIPTION_API_URL}/api/subscription-status`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Telegram-Init-Data': getTelegramInitData() || '',
-      },
-    });
-    if (!response.ok) throw new Error('API error');
-    const data = await response.json();
-    return { subscription: data.subscription, freeEras: data.freeEras || FREE_ERAS_COUNT };
+    const chatId = tgUser?.id;
+    if (!chatId) {
+      return { subscription: false, freeEras: FREE_ERAS_COUNT };
+    }
+
+    // Используем API бота для проверки доступа
+    const res = await fetch(
+      `${BOT_API_URL}/api/check-access?chat_id=${chatId}`,
+      { method: 'GET' }
+    );
+    
+    if (!res.ok) throw new Error('API error');
+    const data = await res.json();
+    
+    const result = {
+      subscription: data.unlocked === true,
+      freeEras: FREE_ERAS_COUNT,
+    };
+    
+    cachedSubscriptionResult = result;
+    lastSubscriptionCheck = now;
+    return result;
   } catch {
     // Если сервер недоступен — считаем пользователя без подписки
     return { subscription: false, freeEras: FREE_ERAS_COUNT };
@@ -72,15 +96,14 @@ function getDiagnosticErasForTarget(targetEraIndex: number): string[] {
 const DIAGNOSTIC_PASS_THRESHOLD = 70;
 
 function getInitialState(): AppState {
-  // Только первая эпоха разблокирована по умолчанию
-  const firstEra = eras[0]?.id;
-  const unlockedEras = firstEra ? [firstEra] : [];
+  // Разблокированы первые FREE_ERAS_COUNT эпох бесплатно
+  const unlockedEras = eras.slice(0, FREE_ERAS_COUNT).map(e => e.id);
   
   // Разблокируем первые уроки для первой эпохи
   const unlockedLessons: string[] = ['l1'];
-  const era = eras[0];
-  if (era && era.lessonIds.length > 0) {
-    const firstLesson = era.lessonIds[0];
+  const firstEra = eras[0];
+  if (firstEra && firstEra.lessonIds.length > 0) {
+    const firstLesson = firstEra.lessonIds[0];
     if (!unlockedLessons.includes(firstLesson)) {
       unlockedLessons.push(firstLesson);
     }
@@ -410,20 +433,25 @@ export const useStore = create<AppState & StoreActions>()(
             const nextEra = eras[currentEraIndex + 1];
             
             if (nextEra && !state.unlockedEras.includes(nextEra.id)) {
-              newState.unlockedEras = [...state.unlockedEras, nextEra.id];
-              
-              if (nextEra.lessonIds.length > 0) {
-                const firstLessonOfNextEra = nextEra.lessonIds[0];
-                if (![...state.unlockedLessons, ...(newState.unlockedLessons || [])].includes(firstLessonOfNextEra)) {
-                  newState.unlockedLessons = [
-                    ...(newState.unlockedLessons || state.unlockedLessons),
-                    firstLessonOfNextEra
-                  ];
+              // Следующая эпоха разблокируется только если она входит в бесплатные
+              // ИЛИ если пользователь купил подписку
+              const nextEraIndex = eras.findIndex(e => e.id === nextEra.id);
+              if (nextEraIndex < FREE_ERAS_COUNT) {
+                newState.unlockedEras = [...state.unlockedEras, nextEra.id];
+                
+                if (nextEra.lessonIds.length > 0) {
+                  const firstLessonOfNextEra = nextEra.lessonIds[0];
+                  if (![...state.unlockedLessons, ...(newState.unlockedLessons || [])].includes(firstLessonOfNextEra)) {
+                    newState.unlockedLessons = [
+                      ...(newState.unlockedLessons || state.unlockedLessons),
+                      firstLessonOfNextEra
+                    ];
+                  }
                 }
+                
+                newState.xp = (newState.xp !== undefined ? newState.xp : state.xp) + 100;
+                newState.level = getLevelFromXp(newState.xp);
               }
-              
-              newState.xp = (newState.xp !== undefined ? newState.xp : state.xp) + 100;
-              newState.level = getLevelFromXp(newState.xp);
             }
           }
         }
@@ -723,13 +751,12 @@ export function unlockAllEras() {
 export function lockAllEras() {
   const state = useStore.getState();
   
-  // Возвращаем к исходному состоянию — только первая эпоха
-  const firstEra = eras[0]?.id;
-  const unlockedEras = firstEra ? [firstEra] : [];
+  // Возвращаем к исходному состоянию — только первые FREE_ERAS_COUNT эпох
+  const unlockedEras = eras.slice(0, FREE_ERAS_COUNT).map(e => e.id);
   const unlockedLessons = ['l1'];
-  const era = eras[0];
-  if (era && era.lessonIds.length > 0) {
-    const firstLesson = era.lessonIds[0];
+  const firstEra = eras[0];
+  if (firstEra && firstEra.lessonIds.length > 0) {
+    const firstLesson = firstEra.lessonIds[0];
     if (!unlockedLessons.includes(firstLesson)) {
       unlockedLessons.push(firstLesson);
     }

@@ -1,9 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, History, Heart, Clock, Zap, Crown, Lock, CheckCircle, TestTube, Swords, BookOpen, Brain } from 'lucide-react';
+import { RefreshCw, History, Heart, Clock, Zap, Crown, Lock, CheckCircle, TestTube, Swords, BookOpen, Brain, Star } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TopBar, DailyGoalBar } from '../components/ui/TopBar';
-import { useStore } from '../store/useStore';
+import { useStore, checkSubscriptionStatus, FREE_ERAS_COUNT } from '../store/useStore';
 import { eras, lessons, historyCards } from '../data/historyDates';
 import { getTopWeakCards } from '../utils/cardAnalysis';
 

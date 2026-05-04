@@ -1,252 +1,478 @@
-const TelegramBot = require('node-telegram-bot-api');
-const path = require('path');
-const fs = require('fs');
-require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+/**
+ * Бот для подготовки к ЕГЭ по истории
+ * Production-версия: Express + PostgreSQL + Webhook + ЮKassa
+ * 
+ * Запуск: npm start
+ * Миграция БД: npm run migrate
+ */
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const MINI_APP_URL = process.env.MINI_APP_URL || 'https://history-ege.vercel.app';
-const ADMIN_ID = 1794125580;
-const USERS_FILE = path.join(__dirname, 'users.json');
-const ADMIN_API_SECRET = process.env.ADMIN_API_SECRET || 'admin-secret-2024';
-const API_URL = process.env.API_URL || 'https://history-ege.vercel.app';
+require('dotenv').config();
 
-if (!TOKEN) {
-  console.error('❌ TELEGRAM_BOT_TOKEN не указан в .env');
-  process.exit(1);
-}
+const express = require('express');
+const crypto = require('crypto');
+const fetch = require('node-fetch');
 
-const bot = new TelegramBot(TOKEN, { polling: true });
+const db = require('./src/db');
 
-// ==================== ХРАНИЛИЩЕ ПОЛЬЗОВАТЕЛЕЙ ====================
+// ======================== КОНФИГУРАЦИЯ ========================
 
-function loadUsers() {
+const config = {
+  TELEGRAM_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+  BOT_USERNAME: process.env.BOT_USERNAME || 'history_ege_bot',
+  MINI_APP_URL: process.env.MINI_APP_URL || 'https://history-ege.vercel.app',
+  ADMIN_ID: parseInt(process.env.ADMIN_ID || '0'),
+  ADMIN_API_SECRET: process.env.ADMIN_API_SECRET || 'admin-secret-2024',
+  API_PORT: parseInt(process.env.API_PORT || '3000'),
+  
+  // ЮKassa
+  YUKASSA_SHOP_ID: process.env.YUKASSA_SHOP_ID || '',
+  YUKASSA_SECRET_KEY: process.env.YUKASSA_SECRET_KEY || '',
+  
+  // Цены (в рублях)
+  PRICE_UNLOCK: 199, // разблокировка всех эпох
+  
+  // Внешний URL для вебхуков (для ЮKassa)
+  EXTERNAL_URL: process.env.EXTERNAL_URL || '',
+  
+  // SOCKS5 прокси для Telegram API (обходит блокировки в Москве)
+  // По умолчанию: host.docker.internal:1080 (SOCKS5 на хосте VDS)
+  SOCKS_PROXY: process.env.SOCKS_PROXY || 'socks5://host.docker.internal:1080',
+};
+
+// ======================== TELEGRAM API ========================
+
+// Используем Cloudflare Worker как прокси для Telegram API (обходит блокировки)
+const TELEGRAM_API = `https://tg-proxy.tompulpie.workers.dev/bot${config.TELEGRAM_TOKEN}`;
+
+async function tgCall(method, params = {}) {
   try {
-    if (fs.existsSync(USERS_FILE)) {
-      return JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('Ошибка загрузки users.json:', e.message);
-  }
-  return {};
-}
-
-function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
-
-function registerUser(chatId, msg) {
-  const users = loadUsers();
-  if (!users[chatId]) {
-    users[chatId] = {
-      firstSeen: new Date().toISOString(),
-      firstName: msg.from?.first_name || '',
-      lastName: msg.from?.last_name || '',
-      username: msg.from?.username || '',
-      lastActivity: new Date().toISOString(),
-      unlockedAll: false,
+    const url = `${TELEGRAM_API}/${method}`;
+    
+    const fetchOptions = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params || {}),
     };
-  } else {
-    users[chatId].lastActivity = new Date().toISOString();
-    users[chatId].firstName = msg.from?.first_name || users[chatId].firstName;
-    users[chatId].lastName = msg.from?.last_name || users[chatId].lastName;
-    users[chatId].username = msg.from?.username || users[chatId].username;
+    
+
+    const res = await fetch(url, fetchOptions);
+    const data = await res.json();
+    if (!data.ok) {
+      console.error(`❌ Telegram API error [${method}]:`, data.description);
+    }
+    return data;
+  } catch (err) {
+    console.error(`❌ Telegram API fetch error [${method}]:`, err.message);
+    return { ok: false };
   }
-  saveUsers(users);
 }
 
-// ==================== КОМАНДЫ ====================
+async function sendMessage(chatId, text, extra = {}) {
+  return tgCall('sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: extra.parse_mode || 'Markdown',
+    ...(extra.reply_markup ? { reply_markup: extra.reply_markup } : {}),
+  });
+}
 
-// /start
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  const firstName = msg.from.first_name || 'друг';
-  registerUser(chatId, msg);
+async function editMessageText(chatId, messageId, text, extra = {}) {
+  return tgCall('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: extra.parse_mode || 'Markdown',
+    ...(extra.reply_markup ? { reply_markup: extra.reply_markup } : {}),
+  });
+}
 
-  bot.sendMessage(
-    chatId,
-    `🎓 *Привет, ${firstName}!*\n\nЭто приложение для подготовки к ЕГЭ по истории России.\n\n📚 *Что внутри:*\n• 60+ уроков по всем эпохам\n• Интерактивные тесты и задания\n• Отслеживание прогресса\n• Система повторений\n• Статистика и достижения\n\nНажми кнопку ниже, чтобы начать! 👇`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '🚀 Запустить Mini App',
-              web_app: { url: MINI_APP_URL }
-            }
-          ]
-        ]
+// ======================== ПОЛУЧЕНИЕ ОБНОВЛЕНИЙ ========================
+
+async function getUpdates(offset = 0) {
+  const result = await tgCall('getUpdates', {
+    offset,
+    timeout: 300,
+    allowed_updates: ['message', 'callback_query'],
+  });
+  if (result.ok) {
+    return result.result || [];
+  }
+  return [];
+}
+
+async function deleteWebhook() {
+  const result = await tgCall('deleteWebhook');
+  if (result.ok) {
+    console.log('✅ Webhook удалён, переключаюсь на polling');
+  }
+  return result;
+}
+
+// ======================== POLLING ========================
+
+let pollingOffset = 0;
+let pollingActive = false;
+
+async function startPolling() {
+  if (pollingActive) return;
+  pollingActive = true;
+  console.log('🔄 Polling запущен...');
+  
+  while (pollingActive) {
+    try {
+      const updates = await getUpdates(pollingOffset);
+      for (const update of updates) {
+        pollingOffset = update.update_id + 1;
+        processUpdate(update).catch(err => {
+          console.error('❌ processUpdate error:', err.message);
+        });
       }
+    } catch (err) {
+      console.error('❌ Polling error:', err.message);
+      await new Promise(r => setTimeout(r, 1000));
     }
-  );
-});
+  }
+}
 
-// /app
-bot.onText(/\/app/, (msg) => {
-  const chatId = msg.chat.id;
-  registerUser(chatId, msg);
-  bot.sendMessage(
-    chatId,
-    'Нажми кнопку, чтобы открыть приложение:',
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '📱 Открыть Mini App',
-              web_app: { url: MINI_APP_URL }
-            }
-          ]
-        ]
-      }
+function stopPolling() {
+  pollingActive = false;
+  console.log('🛑 Polling остановлен');
+}
+
+// ======================== КНОПКИ ========================
+
+function mainKeyboard(url) {
+  return JSON.stringify({
+    inline_keyboard: [
+      [{ text: '🚀 Запустить Mini App', web_app: { url: url || config.MINI_APP_URL } }],
+    ],
+  });
+}
+
+function payKeyboard(paymentUrl) {
+  return JSON.stringify({
+    inline_keyboard: [
+      [{ text: '💳 Оплатить 199₽', url: paymentUrl }],
+      [{ text: '◀️ Назад', callback_data: 'back_main' }],
+    ],
+  });
+}
+
+function mainMenuKeyboard() {
+  return JSON.stringify({
+    inline_keyboard: [
+      [{ text: '🚀 Запустить Mini App', web_app: { url: config.MINI_APP_URL } }],
+      [{ text: '💎 Купить полный доступ', callback_data: 'buy_access' }],
+      [{ text: '📖 Помощь', callback_data: 'help' }],
+    ],
+  });
+}
+
+// ======================== ЮKASSA ========================
+
+async function createPayment(chatId, amount, description) {
+  if (!config.YUKASSA_SHOP_ID || !config.YUKASSA_SECRET_KEY) {
+    console.warn('⚠️ ЮKassa не настроена');
+    return null;
+  }
+
+  const idempotenceKey = crypto.randomUUID();
+  const auth = Buffer.from(
+    `${config.YUKASSA_SHOP_ID}:${config.YUKASSA_SECRET_KEY}`
+  ).toString('base64');
+
+  const callbackUrl = config.EXTERNAL_URL
+    ? `${config.EXTERNAL_URL}/api/yookassa/callback`
+    : '';
+
+  try {
+    const res = await fetch('https://api.yookassa.ru/v3/payments', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/json',
+        'Idempotence-Key': idempotenceKey,
+      },
+      body: JSON.stringify({
+        amount: {
+          value: amount.toFixed(2),
+          currency: 'RUB',
+        },
+        capture: true,
+        confirmation: {
+          type: 'redirect',
+          return_url: config.MINI_APP_URL,
+        },
+        description: description || `Разблокировка всех эпох (chat: ${chatId})`,
+        metadata: {
+          chat_id: String(chatId),
+          type: 'unlock_all',
+        },
+        ...(callbackUrl ? { notification_url: callbackUrl } : {}),
+      }),
+    });
+
+    const payment = await res.json();
+
+    if (payment.id) {
+      // Сохраняем платёж в БД
+      await db.createPayment(chatId, payment.id, amount, 'pending');
+      return payment;
+    } else {
+      console.error('❌ ЮKassa error:', payment);
+      return null;
     }
-  );
-});
+  } catch (err) {
+    console.error('❌ ЮKassa create payment error:', err.message);
+    return null;
+  }
+}
 
-// /help
-bot.onText(/\/help/, (msg) => {
+async function getPaymentStatus(paymentId) {
+  if (!config.YUKASSA_SHOP_ID || !config.YUKASSA_SECRET_KEY) return null;
+  
+  const auth = Buffer.from(
+    `${config.YUKASSA_SHOP_ID}:${config.YUKASSA_SECRET_KEY}`
+  ).toString('base64');
+
+  try {
+    const res = await fetch(`https://api.yookassa.ru/v3/payments/${paymentId}`, {
+      headers: {
+        'Authorization': `Basic ${auth}`,
+      },
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('❌ ЮKassa get payment error:', err.message);
+    return null;
+  }
+}
+
+// ======================== ОБРАБОТКА КОМАНД ========================
+
+async function handleStart(msg) {
   const chatId = msg.chat.id;
-  registerUser(chatId, msg);
-  bot.sendMessage(
+  const firstName = msg.from?.first_name || '';
+  const lastName = msg.from?.last_name || '';
+  const username = msg.from?.username || '';
+
+  // Регистрируем пользователя
+  await db.createUser(chatId, firstName, lastName, username);
+
+  // Приветствие
+  await sendMessage(
     chatId,
+    `🎓 *Привет, ${firstName || 'друг'}!*\n\nЭто приложение для подготовки к ЕГЭ по истории России.\n\n📚 *Что внутри:*\n• 60+ уроков по всем эпохам\n• Интерактивные тесты и задания\n• Отслеживание прогресса\n• Система повторений\n• Статистика и достижения\n\nНажми кнопку ниже, чтобы начать! 👇`,
+    { reply_markup: mainMenuKeyboard() }
+  );
+}
+
+async function handleHelp(chatId) {
+  const text = 
     `*📖 Помощь*\n\n` +
     `• */start* — открыть главное меню\n` +
-    `• */app* — запустить Mini App\n` +
     `• */help* — эта подсказка\n\n` +
-    `*По вопросам:* @tema2017_ege`,
-    { parse_mode: 'Markdown' }
+    `*Что делать:*\n` +
+    `1. Нажми "🚀 Запустить Mini App"\n` +
+    `2. Выбери эпоху для изучения\n` +
+    `3. Изучай даты и выполняй задания\n\n` +
+    `*💎 Полный доступ:*\n` +
+    `Купи разблокировку всех эпох — *199₽*.\nНажми /buy или кнопку "💎 Купить полный доступ".\n\n` +
+    `*По вопросам:* @tema2017_ege`;
+
+  await sendMessage(chatId, text);
+}
+
+async function handleBuy(chatId) {
+  const user = await db.getUser(chatId);
+  
+  if (user && user.unlocked_all) {
+    await sendMessage(
+      chatId,
+      '✅ *У вас уже есть полный доступ!*\n\nВсе эпохи разблокированы. Наслаждайтесь обучением! 🎓',
+      { reply_markup: mainKeyboard() }
+    );
+    return;
+  }
+
+  // Создаём платёж
+  const payment = await createPayment(
+    chatId,
+    config.PRICE_UNLOCK,
+    'Разблокировка всех эпох истории России'
   );
-});
 
-// ==================== АДМИН-ПАНЕЛЬ ====================
+  if (!payment) {
+    await sendMessage(
+      chatId,
+      '❌ *Извините, оплата временно недоступна.*\n\nПожалуйста, попробуйте позже или свяжитесь с @tema2017_ege',
+    );
+    return;
+  }
 
-bot.onText(/\/admin/, async (msg) => {
+  const paymentUrl = payment.confirmation?.confirmation_url;
+  if (!paymentUrl) {
+    await sendMessage(
+      chatId,
+      '❌ *Ошибка создания платежа.* Попробуйте позже.',
+    );
+    return;
+  }
+
+  await sendMessage(
+    chatId,
+    `💎 *Полный доступ — 199₽*\n\n` +
+    `После оплаты вам откроются все эпохи:\n` +
+    `✅ Древняя Русь\n` +
+    `✅ Период раздробленности\n` +
+    `✅ Монгольское нашествие\n` +
+    `✅ Образование Московского государства\n` +
+    `✅ Царствование Ивана Грозного\n` +
+    `✅ Смутное время\n` +
+    `✅ Первые Романовы\n` +
+    `✅ Эпоха Петра I\n` +
+    `✅ Дворцовые перевороты\n` +
+    `✅ Екатерина II\n` +
+    `✅ XIX век\n` +
+    `✅ XX век и современность\n\n` +
+    `*ID платежа:* \`${payment.id}\`\n\n` +
+    `После оплаты нажми "✅ Я оплатил" для проверки.`,
+    { reply_markup: payKeyboard(paymentUrl) }
+  );
+}
+
+async function handleCheckPayment(chatId, paymentId) {
+  // Сначала проверяем в БД
+  const payment = await db.getPayment(paymentId);
+  
+  if (!payment) {
+    await sendMessage(chatId, '❌ Платёж не найден. Попробуйте оплатить снова: /buy');
+    return;
+  }
+
+  // Если уже подтверждён
+  if (payment.status === 'succeeded') {
+    await db.setUnlocked(chatId, true);
+    await sendMessage(
+      chatId,
+      '✅ *Оплата подтверждена!*\n\nВсе эпохи разблокированы! 🎉\nНажми кнопку ниже, чтобы начать:',
+      { reply_markup: mainKeyboard() }
+    );
+    return;
+  }
+
+  // Проверяем статус в ЮKassa
+  const yooPayment = await getPaymentStatus(paymentId);
+  
+  if (yooPayment && yooPayment.status === 'succeeded') {
+    await db.updatePaymentStatus(paymentId, 'succeeded');
+    await db.setUnlocked(chatId, true);
+    
+    await sendMessage(
+      chatId,
+      '✅ *Оплата подтверждена! СПАСИБО!* 🎉\n\nВсе эпохи разблокированы.\nНажми кнопку ниже, чтобы начать обучение:',
+      { reply_markup: mainKeyboard() }
+    );
+    
+    // Уведомление админу
+    if (config.ADMIN_ID) {
+      const user = await db.getUser(chatId);
+      const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || '—';
+      const username = user?.username ? `@${user?.username}` : '—';
+      
+      await sendMessage(
+        config.ADMIN_ID,
+        `💰 *Новая оплата!*\n\nПользователь: ${name} (${username})\nChat ID: \`${chatId}\`\nСумма: ${payment.amount}₽\nПлатёж: \`${paymentId}\``
+      );
+    }
+  } else {
+    const status = yooPayment?.status || 'неизвестно';
+    await sendMessage(
+      chatId,
+      `⏳ *Платёж ещё не подтверждён.*\n\nСтатус: \`${status}\`\n\nЕсли вы уже оплатили, попробуйте проверить через минуту.\nЕсли проблема не решается — напишите @tema2017_ege\n\nID платежа: \`${paymentId}\``
+    );
+  }
+}
+
+// ======================== АДМИН-ПАНЕЛЬ ========================
+
+async function handleAdmin(msg) {
   const chatId = msg.chat.id;
-
-  if (chatId !== ADMIN_ID) {
-    return bot.sendMessage(chatId, '⛔ Доступ запрещён.');
+  if (chatId !== config.ADMIN_ID) {
+    return sendMessage(chatId, '⛔ Доступ запрещён.');
   }
 
   const text = msg.text || '';
-  const args = text.split(' ').slice(1); // ["unlock", "12345"] или ["stats"] или ["broadcast", "текст"]
-
-  if (args.length === 0) {
-    return bot.sendMessage(
-      chatId,
-      `*🛠 Админ-панель*\n\n` +
-      `*/admin stats* — статистика\n` +
-      `*/admin unlock <chatId>* — разблокировать все эпохи пользователю\n` +
-      `*/admin lock <chatId>* — забрать разблокировку\n` +
-      `*/admin broadcast <текст>* — разослать сообщение всем\n` +
-      `*/admin users* — список пользователей`,
-      { parse_mode: 'Markdown' }
-    );
-  }
-
+  const args = text.split(' ').slice(1);
   const command = args[0];
+
+  const helpText = 
+    `*🛠 Админ-панель*\n\n` +
+    `*/admin stats* — статистика\n` +
+    `*/admin unlock <chatId>* — разблокировать все эпохи\n` +
+    `*/admin lock <chatId>* — забрать разблокировку\n` +
+    `*/admin broadcast <текст>* — разослать сообщение\n` +
+    `*/admin users* — список пользователей\n` +
+    `*/admin webhook* — переустановить webhook\n` +
+    `*/admin check <paymentId>* — проверить платёж\n` +
+    `*/admin testpay <chatId>* — имитировать оплату (для теста)`;
+
+  if (!command) {
+    return sendMessage(chatId, helpText);
+  }
 
   // ===== СТАТИСТИКА =====
   if (command === 'stats') {
-    const users = loadUsers();
-    const total = Object.keys(users).length;
-    const unlocked = Object.values(users).filter(u => u.unlockedAll).length;
-    const today = new Date().toDateString();
-    const activeToday = Object.values(users).filter(u => {
-      const d = new Date(u.lastActivity).toDateString();
-      return d === today;
-    }).length;
-
-    const msgText = 
+    const stats = await db.getStats();
+    return sendMessage(chatId,
       `*📊 Статистика*\n\n` +
-      `👥 Всего пользователей: *${total}*\n` +
-      `🌟 С разблокировкой: *${unlocked}*\n` +
-      `⚡ Активных сегодня: *${activeToday}*`;
-
-    return bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
+      `👥 Всего пользователей: *${stats.total}*\n` +
+      `🌟 С разблокировкой: *${stats.unlocked}*\n` +
+      `⚡ Активных сегодня: *${stats.active_today}*`
+    );
   }
 
   // ===== СПИСОК ПОЛЬЗОВАТЕЛЕЙ =====
   if (command === 'users') {
-    const users = loadUsers();
-    const entries = Object.entries(users);
-    if (entries.length === 0) {
-      return bot.sendMessage(chatId, '❌ Нет зарегистрированных пользователей.');
+    const users = await db.getAllUsers();
+    if (users.length === 0) {
+      return sendMessage(chatId, '❌ Нет зарегистрированных пользователей.');
     }
 
-    // Показываем только первых 20, чтобы не превысить лимит
-    const list = entries.slice(0, 20).map(([id, u]) => {
-      const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || '—';
+    const list = users.slice(0, 20).map(u => {
+      const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || '—';
       const username = u.username ? `@${u.username}` : '—';
-      const unlocked = u.unlockedAll ? ' ✅' : '';
-      return `• \`${id}\` ${name} (${username})${unlocked}`;
+      const unlocked = u.unlocked_all ? ' ✅' : '';
+      const activity = u.last_activity 
+        ? new Date(u.last_activity).toLocaleDateString('ru-RU') 
+        : '—';
+      return `• \`${u.chat_id}\` ${name} (${username})${unlocked} [${activity}]`;
     }).join('\n');
 
-    const total = entries.length;
-    const more = total > 20 ? `\n...и ещё ${total - 20}` : '';
-
-    return bot.sendMessage(
-      chatId,
-      `*👥 Пользователи (${total}):*\n\n${list}${more}`,
-      { parse_mode: 'Markdown' }
+    return sendMessage(chatId, 
+      `*👥 Пользователи (${users.length}):*\n\n${list}`
     );
   }
 
-  // ===== РАЗБЛОКИРОВАТЬ ВСЕ ЭПОХИ =====
+  // ===== РАЗБЛОКИРОВАТЬ =====
   if (command === 'unlock') {
     const targetId = parseInt(args[1]);
     if (!targetId) {
-      return bot.sendMessage(chatId, '❌ Укажи chatId: `/admin unlock 123456789`', { parse_mode: 'Markdown' });
+      return sendMessage(chatId, '❌ Укажи chatId: \`/admin unlock 123456789\`');
     }
 
-    // Сохраняем в локальный users.json
-    const users = loadUsers();
-    if (!users[targetId]) {
-      users[targetId] = {
-        firstSeen: new Date().toISOString(),
-        firstName: '',
-        lastName: '',
-        username: '',
-        lastActivity: new Date().toISOString(),
-      };
-    }
-    users[targetId].unlockedAll = true;
-    saveUsers(users);
+    await db.createUser(targetId, '', '', '');
+    await db.setUnlocked(targetId, true);
+    await sendMessage(chatId, `✅ Эпохи разблокированы для \`${targetId}\``);
 
-    // Отправляем запрос на API, чтобы статус был доступен приложению
     try {
-      await fetch(`${API_URL}/api/unlock-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: targetId,
-          action: 'unlock',
-          secret: ADMIN_API_SECRET
-        })
-      });
-    } catch (e) {
-      console.error('API unlock error:', e.message);
-    }
-
-    await bot.sendMessage(chatId, `✅ Эпохи разблокированы для \`${targetId}\``, { parse_mode: 'Markdown' });
-
-    // Пробуем отправить пользователю уведомление
-    try {
-      await bot.sendMessage(
-        targetId,
+      await sendMessage(targetId,
         `🎉 *Все эпохи разблокированы!*\n\nТебе открыты все уроки и материалы. Нажми кнопку ниже, чтобы начать:`,
-        {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '🚀 Открыть Mini App', web_app: { url: MINI_APP_URL } }]
-            ]
-          }
-        }
+        { reply_markup: mainKeyboard() }
       );
-    } catch (e) {
-      await bot.sendMessage(chatId, `⚠️ Не удалось уведомить пользователя \`${targetId}\` (возможно, не начинал диалог с ботом)`, { parse_mode: 'Markdown' });
+    } catch {
+      await sendMessage(chatId, `⚠️ Не удалось уведомить пользователя \`${targetId}\``);
     }
-
     return;
   }
 
@@ -254,109 +480,426 @@ bot.onText(/\/admin/, async (msg) => {
   if (command === 'lock') {
     const targetId = parseInt(args[1]);
     if (!targetId) {
-      return bot.sendMessage(chatId, '❌ Укажи chatId: `/admin lock 123456789`', { parse_mode: 'Markdown' });
+      return sendMessage(chatId, '❌ Укажи chatId: \`/admin lock 123456789\`');
     }
-
-    const users = loadUsers();
-    if (users[targetId]) {
-      users[targetId].unlockedAll = false;
-      saveUsers(users);
-    }
-
-    // Отправляем запрос на API
-    try {
-      await fetch(`${API_URL}/api/unlock-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: targetId,
-          action: 'lock',
-          secret: ADMIN_API_SECRET
-        })
-      });
-    } catch (e) {
-      console.error('API lock error:', e.message);
-    }
-
-    return bot.sendMessage(chatId, `✅ Разблокировка отозвана для \`${targetId}\``, { parse_mode: 'Markdown' });
+    await db.setUnlocked(targetId, false);
+    return sendMessage(chatId, `✅ Разблокировка отозвана для \`${targetId}\``);
   }
 
   // ===== РАССЫЛКА =====
   if (command === 'broadcast') {
     const broadcastText = args.slice(1).join(' ');
     if (!broadcastText) {
-      return bot.sendMessage(chatId, '❌ Укажи текст: `/admin broadcast Привет всем!`', { parse_mode: 'Markdown' });
+      return sendMessage(chatId, '❌ Укажи текст: \`/admin broadcast Привет всем!\`');
     }
 
-    const users = loadUsers();
-    const chatIds = Object.keys(users).map(Number);
-    
-    if (chatIds.length === 0) {
-      return bot.sendMessage(chatId, '❌ Нет пользователей для рассылки.');
+    const users = await db.getAllUsers();
+    if (users.length === 0) {
+      return sendMessage(chatId, '❌ Нет пользователей для рассылки.');
     }
 
-    await bot.sendMessage(chatId, `📨 Начинаю рассылку *${chatIds.length}* пользователям...`, { parse_mode: 'Markdown' });
+    await sendMessage(chatId, `📨 Начинаю рассылку *${users.length}* пользователям...`);
 
     let sent = 0;
     let failed = 0;
 
-    for (const id of chatIds) {
+    for (const user of users) {
       try {
-        await bot.sendMessage(id, broadcastText, { parse_mode: 'Markdown' });
+        await sendMessage(user.chat_id, broadcastText);
         sent++;
-        // Небольшая задержка, чтобы не превысить лимиты Telegram
-        await new Promise(r => setTimeout(r, 50));
-      } catch (e) {
+        if (sent % 10 === 0) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+      } catch {
         failed++;
       }
     }
 
-    return bot.sendMessage(
-      chatId,
-      `✅ Рассылка завершена!\n📨 Отправлено: *${sent}*\n❌ Ошибок: *${failed}*`,
-      { parse_mode: 'Markdown' }
+    return sendMessage(chatId,
+      `✅ Рассылка завершена!\n📨 Отправлено: *${sent}*\n❌ Ошибок: *${failed}*`
     );
   }
 
-  // Неизвестная команда
-  return bot.sendMessage(
-    chatId,
-    `❌ Неизвестная команда. Используй:\n` +
-    `• \`/admin stats\`\n` +
-    `• \`/admin unlock <chatId>\`\n` +
-    `• \`/admin lock <chatId>\`\n` +
-    `• \`/admin broadcast <текст>\`\n` +
-    `• \`/admin users\``,
-    { parse_mode: 'Markdown' }
-  );
-});
+  // ===== ПЕРЕУСТАНОВИТЬ WEBHOOK =====
+  if (command === 'webhook') {
+    const result = await setWebhook();
+    return sendMessage(chatId, result.ok 
+      ? '✅ Webhook переустановлен' 
+      : `❌ Ошибка: ${result.description}`
+    );
+  }
 
-// ==================== ЛЮБОЕ СООБЩЕНИЕ ====================
+  // ===== ПРОВЕРИТЬ ПЛАТЁЖ =====
+  if (command === 'check') {
+    const paymentId = args[1];
+    if (!paymentId) {
+      return sendMessage(chatId, '❌ Укажи paymentId');
+    }
 
-bot.on('message', (msg) => {
-  if (msg.text && !msg.text.startsWith('/')) {
-    const chatId = msg.chat.id;
-    registerUser(chatId, msg);
-    bot.sendMessage(
-      chatId,
-      'Используй /start чтобы открыть приложение, или /help для подсказки.',
-      {
-        reply_markup: {
-          remove_keyboard: true
-        }
+    const payment = await db.getPayment(paymentId);
+    if (payment) {
+      const yooPayment = await getPaymentStatus(paymentId);
+      return sendMessage(chatId,
+        `*🔍 Платёж*\n\n` +
+        `ID: \`${payment.payment_id}\`\n` +
+        `Chat ID: \`${payment.chat_id}\`\n` +
+        `Сумма: ${payment.amount}₽\n` +
+        `Статус в БД: \`${payment.status}\`\n` +
+        `Статус в ЮKassa: \`${yooPayment?.status || 'ошибка'}\``
+      );
+    } else {
+      return sendMessage(chatId, '❌ Платёж не найден в БД.');
+    }
+  }
+
+  // ===== ТЕСТОВАЯ ОПЛАТА =====
+  if (command === 'testpay') {
+    const targetId = parseInt(args[1]);
+    if (!targetId) {
+      return sendMessage(chatId, '❌ Укажи chatId: \`/admin testpay 123456789\`');
+    }
+
+    await db.createUser(targetId, '', '', '');
+    await db.createPayment(targetId, `test_${Date.now()}`, 199, 'succeeded');
+    await db.setUnlocked(targetId, true);
+
+    await sendMessage(chatId, `✅ Тестовая оплата для \`${targetId}\` выполнена`);
+
+    try {
+      await sendMessage(targetId,
+        `🎉 *Полный доступ активирован!*\n\nВсе эпохи разблокированы. Нажми кнопку ниже, чтобы начать:`,
+        { reply_markup: mainKeyboard() }
+      );
+    } catch {
+      await sendMessage(chatId, `⚠️ Не удалось уведомить пользователя \`${targetId}\``);
+    }
+    return;
+  }
+
+  return sendMessage(chatId, '❌ Неизвестная команда.');
+}
+
+// ======================== ОБРАБОТКА СООБЩЕНИЙ ========================
+
+async function processUpdate(update) {
+  try {
+    // Callback query
+    if (update.callback_query) {
+      const cb = update.callback_query;
+      const chatId = cb.message.chat.id;
+      const messageId = cb.message.message_id;
+      const data = cb.data || '';
+
+      // Подтверждаем получение callback
+      await tgCall('answerCallbackQuery', { callback_query_id: cb.id });
+
+      if (data === 'back_main') {
+        await editMessageText(chatId, messageId, 
+          '🚀 *Главное меню*\n\nВыберите действие:',
+          { reply_markup: mainMenuKeyboard() }
+        );
+      } else if (data === 'buy_access') {
+        await editMessageText(chatId, messageId, '⏳ Создаю платёж...');
+        await handleBuy(chatId);
+      } else if (data === 'help') {
+        await editMessageText(chatId, messageId, '⏳ Загружаю...');
+        // Сначала отправляем новое сообщение с помощью
+        await sendMessage(chatId,
+          `*📖 Помощь*\n\n` +
+          `Нажми "🚀 Запустить Mini App", чтобы открыть приложение.\n\n` +
+          `В приложении ты найдёшь:\n` +
+          `• Все эпохи истории России\n` +
+          `• Уроки и тесты\n` +
+          `• Статистику прогресса\n\n` +
+          `💎 Купить полный доступ: /buy`
+        );
       }
-    );
+      return;
+    }
+
+    // Обычное сообщение
+    if (update.message) {
+      const msg = update.message;
+      const chatId = msg.chat.id;
+      const text = (msg.text || '').trim();
+      const from = msg.from;
+      
+      // Регистрируем/обновляем пользователя при любом сообщении
+      if (from) {
+        await db.createUser(
+          chatId, 
+          from.first_name || '', 
+          from.last_name || '', 
+          from.username || ''
+        );
+      }
+
+      // === Команды ===
+      if (text === '/start' || text.startsWith('/start ')) {
+        await handleStart(msg);
+      } else if (text === '/help') {
+        await handleHelp(chatId);
+      } else if (text === '/buy' || text === '/pay') {
+        await handleBuy(chatId);
+      } else if (text.startsWith('/check ')) {
+        const paymentId = text.split(' ')[1];
+        if (paymentId) {
+          await handleCheckPayment(chatId, paymentId);
+        } else {
+          await sendMessage(chatId, '❌ Укажи ID платежа: \`/check payment_id\`');
+        }
+      } else if (text.startsWith('/admin')) {
+        await handleAdmin(msg);
+      } else if (text.startsWith('/')) {
+        await sendMessage(chatId, 
+          '❌ Неизвестная команда. Используй /start или /help'
+        );
+      } else {
+        // Любое сообщение — показываем меню
+        await sendMessage(chatId,
+          '🚀 *Главное меню*\n\nИспользуй команды:\n' +
+          '/start — начать\n/help — помощь\n/buy — купить доступ',
+          { reply_markup: mainKeyboard() }
+        );
+      }
+    }
+  } catch (err) {
+    console.error('❌ processUpdate error:', err.message);
+  }
+}
+
+// ======================== EXPRESS СЕРВЕР ========================
+
+const app = express();
+
+// Парсинг JSON (кроме вебхуков Telegram — они приходят в text/plain)
+app.use('/api', express.json());
+app.use('/webhook', express.text({ type: 'text/plain' }));
+
+// ===== API для Mini App =====
+
+// Проверка статуса пользователя (для Mini App)
+app.get('/api/check-access', async (req, res) => {
+  const chatId = parseInt(req.query.chat_id);
+  const secret = req.query.secret;
+
+  if (!chatId) {
+    return res.json({ ok: false, error: 'chat_id required' });
+  }
+
+  // Проверка секрета (необязательно, но желательно)
+  if (secret && secret !== config.ADMIN_API_SECRET) {
+    return res.json({ ok: false, error: 'invalid secret' });
+  }
+
+  try {
+    const user = await db.getUser(chatId);
+    return res.json({
+      ok: true,
+      unlocked: user ? user.unlocked_all : false,
+      user: user ? {
+        chat_id: user.chat_id,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        username: user.username,
+        first_seen: user.first_seen,
+        last_activity: user.last_activity,
+        unlocked_all: user.unlocked_all,
+      } : null,
+    });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
   }
 });
 
-console.log(`🤖 Бот запущен! Админ ID: ${ADMIN_ID}`);
+// Разблокировка через API (для интеграции с Mini App)
+app.post('/api/unlock', express.json(), async (req, res) => {
+  const { chat_id, secret } = req.body;
 
-// Graceful shutdown
-process.once('SIGINT', () => {
-  console.log('\n🛑 Бот остановлен (SIGINT)');
-  bot.stopPolling();
+  if (secret !== config.ADMIN_API_SECRET) {
+    return res.status(403).json({ ok: false, error: 'invalid secret' });
+  }
+
+  if (!chat_id) {
+    return res.json({ ok: false, error: 'chat_id required' });
+  }
+
+  try {
+    await db.createUser(chat_id, '', '', '');
+    await db.setUnlocked(chat_id, true);
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
 });
-process.once('SIGTERM', () => {
-  console.log('\n🛑 Бот остановлен (SIGTERM)');
-  bot.stopPolling();
+
+// Статистика для админ-панели Mini App
+app.get('/api/stats', async (req, res) => {
+  const secret = req.query.secret;
+  if (secret !== config.ADMIN_API_SECRET) {
+    return res.status(403).json({ ok: false, error: 'invalid secret' });
+  }
+
+  try {
+    const stats = await db.getStats();
+    return res.json({ ok: true, ...stats });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
+// ===== Webhook от ЮKassa =====
+
+app.post('/api/yookassa/callback', async (req, res) => {
+  try {
+    const { object, event } = req.body;
+    
+    if (!object || !object.id) {
+      return res.status(400).json({ error: 'invalid payload' });
+    }
+
+    const paymentId = object.id;
+    const status = object.status;
+    const metadata = object.metadata || {};
+    const chatId = parseInt(metadata.chat_id || '0');
+
+    console.log(`🔔 ЮKassa callback: ${paymentId} -> ${status}`);
+
+    if (status === 'succeeded' && chatId) {
+      // Обновляем статус платежа
+      await db.updatePaymentStatus(paymentId, 'succeeded');
+      
+      // Разблокируем пользователя
+      await db.setUnlocked(chatId, true);
+
+      // Уведомление пользователю
+      await sendMessage(chatId,
+        '✅ *Оплата прошла успешно! СПАСИБО!* 🎉\n\nВсе эпохи разблокированы.\nНажми кнопку ниже, чтобы начать:',
+        { reply_markup: mainKeyboard() }
+      );
+
+      // Уведомление админу
+      if (config.ADMIN_ID) {
+        const user = await db.getUser(chatId);
+        const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || '—';
+        const username = user?.username ? `@${user?.username}` : '—';
+        
+        await sendMessage(
+          config.ADMIN_ID,
+          `💰 *Новая оплата (авто)!*\n\nПользователь: ${name} (${username})\nChat ID: \`${chatId}\`\nСумма: ${object.amount?.value || '?'}₽\nПлатёж: \`${paymentId}\``
+        );
+      }
+    } else if (status === 'canceled') {
+      await db.updatePaymentStatus(paymentId, 'canceled');
+    }
+
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('❌ ЮKassa callback error:', err.message);
+    res.status(200).json({ ok: true }); // Always return 200 to ЮKassa
+  }
+});
+
+// ===== Прокси для Telegram API (обходит блокировки) =====
+// Используется, когда TG_API_URL = http://localhost:3000/tg-proxy
+// Принимает POST с JSON { method, params } и отправляет запрос к api.telegram.org
+
+app.post('/tg-proxy', async (req, res) => {
+  try {
+    const { method, params } = req.body;
+    
+    if (!method) {
+      return res.status(400).json({ ok: false, error: 'method required' });
+    }
+    
+    if (!config.TELEGRAM_TOKEN) {
+      return res.status(500).json({ ok: false, error: 'TELEGRAM_BOT_TOKEN not configured' });
+    }
+
+    const url = `https://api.telegram.org/bot${config.TELEGRAM_TOKEN}/${method}`;
+    
+    const apiRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params || {}),
+      // Таймаут 30 секунд для long polling
+      signal: AbortSignal.timeout(35000),
+    });
+
+    const data = await apiRes.json();
+    res.json(data);
+  } catch (err) {
+    console.error('❌ TG proxy error:', err.message);
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+// ===== Webhook от Telegram (не используется, оставлен для совместимости) =====
+
+app.post('/webhook', async (req, res) => {
+  res.status(200).json({ ok: true });
+});
+
+// ===== Health check =====
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    version: '2.0.0',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    bot: config.BOT_USERNAME,
+  });
+});
+
+app.get('/', (req, res) => {
+  res.json({
+    name: 'History EGE Bot',
+    version: '2.0.0',
+    endpoints: {
+      webhook: 'POST /webhook',
+      checkAccess: 'GET /api/check-access',
+      unlock: 'POST /api/unlock',
+      stats: 'GET /api/stats',
+      yookassa: 'POST /api/yookassa/callback',
+      health: 'GET /health',
+    },
+  });
+});
+
+// ======================== ЗАПУСК ========================
+
+async function start() {
+  const port = config.API_PORT || 3000;
+  
+  app.listen(port, '0.0.0.0', async () => {
+    console.log(`\n🤖 History EGE Bot v2.0.0`);
+    console.log(`📡 Сервер запущен на порту ${port}`);
+    console.log(`🆔 Бот: @${config.BOT_USERNAME}`);
+    console.log(`🔗 Mini App: ${config.MINI_APP_URL}`);
+    console.log(`💰 ЮKassa: ${config.YUKASSA_SHOP_ID ? 'настроена' : 'НЕ настроена'}`);
+    console.log(`💾 PostgreSQL: ${process.env.DATABASE_URL ? 'есть' : 'НЕТ'}`);
+    
+    // Удаляем webhook и переключаемся на polling
+    if (config.TELEGRAM_TOKEN) {
+      await deleteWebhook();
+      startPolling();
+    }
+  });
+}
+
+// Обработка сигналов завершения
+process.on('SIGTERM', () => {
+  console.log('🛑 Получен SIGTERM, завершаю работу...');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 Получен SIGINT, завершаю работу...');
+  process.exit(0);
+});
+
+start().catch(err => {
+  console.error('❌ Fatal error:', err);
+  process.exit(1);
 });

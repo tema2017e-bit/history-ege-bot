@@ -1,9 +1,9 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, History, Heart, Clock, Zap, Crown, Lock, CheckCircle, TestTube, Swords, BookOpen, Brain, Star } from 'lucide-react';
+import { RefreshCw, History, Heart, Clock, Zap, Crown, Lock, CheckCircle, TestTube, Swords, BookOpen, Brain, Star, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TopBar, DailyGoalBar } from '../components/ui/TopBar';
-import { useStore, checkSubscriptionStatus, FREE_ERAS_COUNT } from '../store/useStore';
+import { useStore, FREE_ERAS_COUNT } from '../store/useStore';
 import { eras, lessons, historyCards } from '../data/historyDates';
 import { getTopWeakCards } from '../utils/cardAnalysis';
 
@@ -264,12 +264,17 @@ const EraCard: React.FC<{
     );
   }
 
+  const subscription = useStore(s => s.subscription);
+
   if (status === 'locked') {
+    // Если эпоха за пределами бесплатного доступа — показываем подписку
+    const isPremium = eras.findIndex(e => e.id === era.id) >= FREE_ERAS_COUNT && !subscription;
+    
     return (
       <div className="card opacity-60 dark:bg-surface-800">
         <div className="flex items-start gap-3">
           <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 bg-surface-200 dark:bg-surface-700">
-            <Lock className="w-7 h-7 text-surface-400" />
+            {isPremium ? <Sparkles className="w-7 h-7 text-gold-500" /> : <Lock className="w-7 h-7 text-surface-400" />}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
@@ -277,8 +282,15 @@ const EraCard: React.FC<{
               <span className="text-xs text-surface-400">{era.yearRange}</span>
             </div>
             <p className="text-xs text-surface-400 mt-0.5">{era.description}</p>
-            {canDiagnostic ? (
-              <Link to={`/diagnostic/${era.id}`} className="mt-2">
+            {isPremium ? (
+              <Link to="/profile" className="mt-2 inline-block">
+                <div className="bg-gold-500 text-white text-xs py-1.5 px-3 flex items-center gap-1 rounded-lg font-medium">
+                  <Sparkles className="w-3 h-3" />
+                  Оформить подписку
+                </div>
+              </Link>
+            ) : canDiagnostic ? (
+              <Link to={`/diagnostic/${era.id}`} className="mt-2 inline-block">
                 <div className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1 mt-2">
                   <TestTube className="w-3 h-3" />
                   Пройти тест для разблокировки

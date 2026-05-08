@@ -1,35 +1,11 @@
-// API эндпоинт для управления разблокировкой эпох
-// GET /api/unlock-status?userId=123 — проверить статус
+// API эндпоинт для проверки статуса подписки
+// GET /api/unlock-status?userId=123 — проверить статус (прокси на API бота)
 // POST /api/unlock-status — установить статус (только с секретным ключом)
 
-import fs from 'fs';
-import path from 'path';
-
-const DATA_FILE = path.join('/tmp', 'unlock-status.json');
 const ADMIN_SECRET = process.env.ADMIN_API_SECRET || 'admin-secret-2024';
 
-function loadData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('Error reading data file:', e.message);
-  }
-  return {};
-}
-
-function saveData(data) {
-  try {
-    const dir = path.dirname(DATA_FILE);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  } catch (e) {
-    console.error('Error saving data file:', e.message);
-  }
-}
+// URL API бота (VDS/Render)
+const BOT_API_URL = process.env.BOT_API_URL || 'https://history-ege-bot.onrender.com';
 
 export default async function handler(req, res) {
   // CORS
@@ -41,20 +17,47 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // GET — проверка статуса
+  // GET — проверка статуса через API бота
   if (req.method === 'GET') {
     const { userId } = req.query;
     if (!userId) {
       return res.status(400).json({ error: 'Missing userId parameter' });
     }
 
-    const data = loadData();
-    const unlockedAll = data[userId]?.unlockedAll === true;
+    try {
+      // Прокси-запрос к API бота на VDS/Render
+      const botRes = await fetch(
+        `${BOT_API_URL}/api/check-access?chat_id=${userId}&secret=${ADMIN_SECRET}`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+      
+      if (!botRes.ok) {
+        // Если бот недоступен — падаем с ошибкой
+        return res.status(502).json({ 
+          error: 'Bot API unavailable', 
+          userId: parseInt(userId),
+          unlockedAll: false 
+        });
+      }
 
-    return res.status(200).json({ userId: parseInt(userId), unlockedAll });
+      const data = await botRes.json();
+      
+      return res.status(200).json({ 
+        userId: parseInt(userId), 
+        unlockedAll: data.unlocked === true 
+      });
+    } catch (err) {
+      console.error('Error checking access via bot API:', err.message);
+      return res.status(502).json({ 
+        error: 'Bot API request failed',
+        userId: parseInt(userId),
+        unlockedAll: false 
+      });
+    }
   }
 
   // POST — установка статуса (только с секретным ключом)
+  // Прокси-запрос к API бота на VDS/Render
   if (req.method === 'POST') {
     const { userId, action, secret } = req.body;
 
@@ -66,21 +69,41 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid params. Need: userId, action (unlock|lock), secret' });
     }
 
-    const data = loadData();
-    
-    if (action === 'unlock') {
-      data[userId] = { ...data[userId], unlockedAll: true, updatedAt: new Date().toISOString() };
-    } else if (action === 'lock') {
-      data[userId] = { ...data[userId], unlockedAll: false, updatedAt: new Date().toISOString() };
+    try {
+      // Прокси-запрос к API бота для разблокировки
+      const botRes = await fetch(`${BOT_API_URL}/api/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: parseInt(userId),
+          secret: ADMIN_SECRET,
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (!botRes.ok) {
+        return res.status(502).json({ 
+          error: 'Bot API unavailable',
+          userId,
+          unlockedAll: action === 'unlock'
+        });
+      }
+
+      const data = await botRes.json();
+      
+      return res.status(200).json({ 
+        success: data.ok === true, 
+        userId, 
+        unlockedAll: action === 'unlock' 
+      });
+    } catch (err) {
+      console.error('Error setting unlock via bot API:', err.message);
+      return res.status(502).json({ 
+        error: 'Bot API request failed',
+        userId,
+        unlockedAll: action === 'unlock'
+      });
     }
-
-    saveData(data);
-
-    return res.status(200).json({ 
-      success: true, 
-      userId, 
-      unlockedAll: action === 'unlock' 
-    });
   }
 
   // Любой другой метод

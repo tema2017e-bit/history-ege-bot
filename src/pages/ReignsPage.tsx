@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Crown, Trophy, Zap, Target, RefreshCw, Star, AlertTriangle, ChevronRight } from 'lucide-react';
-import { useStore } from '../store/useStore';
+import { ArrowLeft, Crown, Trophy, Zap, Target, RefreshCw, Star, AlertTriangle, ChevronRight, Sparkles, Lock } from 'lucide-react';
+import { useStore, FREE_ERAS_COUNT } from '../store/useStore';
 import { reignClusters, getRulersInCluster, rulers, ReignCluster, Ruler } from '../data/reigns';
 import { generateReignQuestions } from '../utils/reignQuestionGenerator';
 import { checkTextAnswer, isTextQuestion, normalizeYearAnswer } from '../utils/answerNormalizer';
@@ -306,6 +306,8 @@ const ReignsPage: React.FC = () => {
   }
 
   // === СПИСОК КЛАСТЕРОВ ===
+  const subscription = useStore(s => s.subscription);
+
   return (
     <div className="min-h-screen bg-surface-50 dark:bg-surface-900">
       <div className="max-w-lg mx-auto px-4 pb-40">
@@ -349,6 +351,27 @@ const ReignsPage: React.FC = () => {
             const clRulers = getRulersInCluster(cl.id);
             const isDone = completedReignTests.includes(`reign-${cl.id}`);
             const clMastery = reignMastery[cl.id] || 0;
+            const isPremium = index >= FREE_ERAS_COUNT - 1 && !subscription; // 4 эпохи бесплатно
+
+            if (isPremium) {
+              return (
+                <Link key={cl.id} to="/profile" className="block w-full bg-white dark:bg-surface-800 rounded-xl p-4 border border-gold-200 dark:border-gold-800/30 opacity-60 hover:opacity-80 transition-opacity text-left">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0 bg-surface-200 dark:bg-surface-700">
+                      <Sparkles className="w-5 h-5 text-gold-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-surface-500 dark:text-surface-400 text-sm">{cl.name}</span>
+                        <Sparkles className="w-4 h-4 text-gold-500" />
+                      </div>
+                      <p className="text-xs text-surface-400 dark:text-surface-500">{clRulers.length} правителей • {cl.yearRange}</p>
+                      <p className="text-xs text-gold-500 mt-1 font-medium">Доступно по подписке</p>
+                    </div>
+                  </div>
+                </Link>
+              );
+            }
 
             return (
               <motion.button key={cl.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }}

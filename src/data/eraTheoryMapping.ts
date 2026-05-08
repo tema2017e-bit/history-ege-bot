@@ -16,7 +16,7 @@ export const eraToTheorySection: Record<string, string> = {
   // Россия в XVII веке (Первые Романовы)
   'early-romanovs': 'russia-17th',
   // Эпоха Петра I
-  'peter': 'peter-era',
+  'peter': 'peter-great',
   // Эпоха дворцовых переворотов
   'palace_coup': 'palace-coups',
   // Россия во второй половине XVIII века (Екатерина II)

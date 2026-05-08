@@ -31,11 +31,20 @@ async function migrate() {
         first_seen TIMESTAMP DEFAULT NOW(),
         last_activity TIMESTAMP DEFAULT NOW(),
         unlocked_all BOOLEAN DEFAULT false,
+        unlocked_eras JSONB DEFAULT '[]'::jsonb,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
     console.log('✅ Таблица users готова');
+
+    // Добавляем колонку unlocked_eras если её нет (для существующих БД)
+    console.log('📋 Проверка колонки unlocked_eras...');
+    await pool.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS unlocked_eras JSONB DEFAULT '[]'::jsonb;
+    `);
+    console.log('✅ Колонка unlocked_eras готова');
 
     // Таблица платежей
     console.log('📋 Создание таблицы payments...');

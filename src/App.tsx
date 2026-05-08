@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useSearchParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import toast from 'react-hot-toast';
 import HomePage from './pages/HomePage';
 import LessonPage from './pages/LessonPage';
 import ReviewPage from './pages/ReviewPage';
@@ -18,12 +17,12 @@ import EndlessPage from './pages/EndlessPage';
 import { useStore, unlockAllEras, checkSubscriptionStatus } from './store/useStore';
 import { useTelegram } from './utils/telegram';
 
-// Компонент, проверяющий статус подписки через API бота
-// Если у пользователя есть unlocked_all — разблокирует все эпохи
-// Если подписка закончилась — блокируе обратно
+// ==================== ПРОВЕРКА ПОДПИСКИ ====================
+// Компонент проверяет статус подписки через API бота (серверную проверку).
+// initData верифицируется на сервере — подделать нельзя.
 const SubscriptionHandler: React.FC = () => {
   const tgUser = useStore(state => state.tgUser);
-  const unlockedAllByAdmin = useStore(state => state.unlockedAllByAdmin);
+  const setSubscription = useStore(state => state.setSubscription);
 
   useEffect(() => {
     if (!tgUser?.id) return;
@@ -36,11 +35,9 @@ const SubscriptionHandler: React.FC = () => {
         if (cancelled) return;
 
         if (result.subscription) {
-          // Пользователь оплатил — разблокируем всё
-          unlockAllEras();
+          // Пользователь оплатил — разблокируем всё (через серверную проверку)
+          setSubscription(true);
         }
-        // Если подписки нет — ничего не делаем,
-        // пользователь всё равно может пользоваться бесплатными эпохами
       } catch (e) {
         console.error('Subscription check failed:', e);
       }
@@ -49,29 +46,30 @@ const SubscriptionHandler: React.FC = () => {
     checkStatus();
 
     return () => { cancelled = true; };
-  }, [tgUser?.id]);
+  }, [tgUser?.id, setSubscription]);
 
   return null;
 };
 
-// Обработчик URL-параметров (unlock=1, subscribe и т.д.)
-const UrlParamHandler: React.FC = () => {
-  const [searchParams] = useSearchParams();
+// ==================== АДМИН-ДОСТУП (ТОЛЬКО ДЛЯ РАЗРАБОТЧИКА) ====================
+// Админские chat_id, которым разрешено использовать dev-функции
+const ADMIN_IDS = [1794125580]; // ID разработчика в Telegram
 
-  useEffect(() => {
-    // Параметр unlock=1 — разблокировать все эпохи (для админов)
-    if (searchParams.get('unlock') === '1') {
-      unlockAllEras();
-      toast.success('✅ Все эпохи разблокированы!', { duration: 3000 });
-      
-      // Убираем параметр из URL
-      const newUrl = window.location.pathname;
-      window.history.replaceState({}, '', newUrl);
-    }
-  }, [searchParams]);
-
-  return null;
-};
+/**
+ * Разблокировка всех эпох через Telegram initData (только для админа).
+ * Использование: открыть Telegram Mini App и нажать на логотип 5 раз.
+ * В браузере эта функция не работает — initData отсутствует.
+ */
+export function checkAdminUnlockFromTelegram(): boolean {
+  const tg = (window as any).Telegram?.WebApp;
+  if (!tg?.initDataUnsafe?.user) return false;
+  
+  const userId = tg.initDataUnsafe.user.id;
+  if (!ADMIN_IDS.includes(userId)) return false;
+  
+  unlockAllEras();
+  return true;
+}
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const onboardingComplete = useStore(state => state.onboardingComplete);
@@ -145,7 +143,6 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <SubscriptionHandler />
-      <UrlParamHandler />
       <Toaster
         position="top-center"
         toastOptions={{

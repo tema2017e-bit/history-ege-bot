@@ -155,6 +155,11 @@ const LessonPage: React.FC = () => {
       } catch {
         correct = false;
       }
+    } else if (currentQuestion.type === 'input-year' || currentQuestion.type === 'fill-blank') {
+      // fill-blank ДОЛЖЕН проверяться ДО isTextQuestion, т.к. isTextQuestion тоже возвращает true для fill-blank
+      const userYear = normalizeYearAnswer(answer);
+      const correctYear = normalizeYearAnswer(currentQuestion.correctAnswer as string);
+      correct = userYear === correctYear;
     } else if (isTextQuestion(currentQuestion.type)) {
       correct = checkTextAnswer(
         answer,
@@ -162,10 +167,6 @@ const LessonPage: React.FC = () => {
         currentQuestion.acceptableAnswers,
         currentQuestion.aliases
       );
-    } else if (currentQuestion.type === 'input-year' || currentQuestion.type === 'fill-blank') {
-      const userYear = normalizeYearAnswer(answer);
-      const correctYear = normalizeYearAnswer(currentQuestion.correctAnswer as string);
-      correct = userYear === correctYear;
     } else {
       correct = answer === currentQuestion.correctAnswer;
     }

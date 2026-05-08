@@ -199,6 +199,8 @@ export interface AppState {
   attemptedDiagnostics: string[];
   // Флаг — все эпохи открыты админом (через URL-параметр)
   unlockedAllByAdmin: boolean;
+  // Флаг — активная подписка (бесконечные сердца, все эпохи)
+  subscription: boolean;
 
 }
 
@@ -267,22 +269,35 @@ export interface TheoryCausalLink {
 export interface TheorySection {
   id: string;
   title: string;
-  shortTitle: string;
-  icon: string;
-  color: string;
-  yearRange: string;
+  shortTitle?: string;
+  icon?: string;
+  color?: string;
+  yearRange?: string;
+  period?: string;
   topics: TheoryTopic[];
 }
 
 export interface TheoryTopic {
   id: string;
   title: string;
-  timeRange: string;
+  timeRange?: string;
   // Связанные cardIds из historyDates (для перехода к практике)
   relatedCardIds?: string[];
   // Связанные уроки
   relatedLessonIds?: string[];
-  // Блоки содержания
+  // Ключевые события (год + описание)
+  keyEvents?: { year: string; event: string }[];
+  // Термины
+  terms?: { term: string; definition: string }[];
+  // Персоны
+  persons?: TheoryPerson[];
+  // Ключевые факты
+  keyFacts?: string[];
+  // Причинно-следственные связи
+  causalLinks?: { cause: string; effect: string }[];
+  // Фокус на ЕГЭ
+  examFocus?: string[];
+  // Блоки содержания (объект с структурированными данными или строка с текстом)
   content: {
     rulers?: TheoryRuler[];
     keyDates?: TheoryDate[];
@@ -293,7 +308,8 @@ export interface TheoryTopic {
     keyFacts?: string[];
     causalLinks?: TheoryCausalLink[];
     examFocus?: string[];
-  };
+    text?: string;
+  } | string;
 }
 
 // ==================== ТИПЫ ДЕЙСТВИЙ STORE ====================

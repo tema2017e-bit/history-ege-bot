@@ -1012,7 +1012,7 @@ function getTermsForEra(eraId: string): { term: string; definition: string }[] {
 
   const allTerms: { term: string; definition: string }[] = [];
   for (const topic of section.topics) {
-    if (topic.content.terms) {
+    if (typeof topic.content !== 'string' && topic.content.terms) {
       allTerms.push(...topic.content.terms);
     }
   }
@@ -1028,7 +1028,7 @@ function getAllTerms(): { term: string; definition: string }[] {
   const allTerms: { term: string; definition: string }[] = [];
   for (const section of theorySections) {
     for (const topic of section.topics) {
-      if (topic.content.terms) {
+      if (typeof topic.content !== 'string' && topic.content.terms) {
         allTerms.push(...topic.content.terms);
       }
     }

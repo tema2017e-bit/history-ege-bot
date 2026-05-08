@@ -1,10 +1,10 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Star, Trophy, Flame, Target, Zap, Heart,
   Award, BookOpen, BarChart3, Brain, Shield, Crown, Swords,
-  Scroll, Gem, Sparkles, Repeat, Clock
+  Scroll, Gem, Sparkles, Repeat, Clock, Unlock, Lock
 } from 'lucide-react';
 import { TopBar } from '../components/ui/TopBar';
 import { useStore } from '../store/useStore';
@@ -60,7 +60,20 @@ const ProfilePage: React.FC = () => {
     cardProgress, weakCards, mistakes,
     dailyGoal, dailyGoalCompleted, achievements,
     completedReignTests, attemptedDiagnostics,
+    subscription,
   } = store;
+
+  // Ссылка на бота для подписки
+  const getBotSubscribeLink = () => {
+    let chatId = '';
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg?.initDataUnsafe?.user?.id) {
+        chatId = tg.initDataUnsafe.user.id;
+      }
+    } catch {}
+    return `https://t.me/HistDate_bot?start=subscribe_${chatId}`;
+  };
 
   // ======================== СТАТИСТИКА ========================
 
@@ -141,11 +154,81 @@ const ProfilePage: React.FC = () => {
           <p className="text-surface-500 dark:text-surface-400 mt-1">Уровень {level} • {xp} XP</p>
         </motion.div>
 
-        {/* ===== СТАТИСТИКА В 3 КОЛОНКИ ===== */}
+        {/* ===== ПОДПИСКА ===== */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
+          className="mb-6"
+        >
+          <div className="card overflow-hidden">
+            {subscription ? (
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-gold-400 to-gold-600">
+                  <Crown className="w-7 h-7 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-surface-800 dark:text-surface-100">Подписка активна ✨</h3>
+                  <p className="text-sm text-surface-500 dark:text-surface-400 mt-1">
+                    Вам доступны все эпохи и бесконечные сердца
+                  </p>
+                  <div className="flex items-center gap-2 mt-3 text-xs text-surface-400 dark:text-surface-500">
+                    <Unlock className="w-3 h-3 text-emerald-500" />
+                    <span>Все эпохи разблокированы</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 text-xs text-surface-400 dark:text-surface-500">
+                    <Heart className="w-3 h-3 text-red-400" />
+                    <span>Бесконечные сердца</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 bg-surface-200 dark:bg-surface-700">
+                  <Lock className="w-7 h-7 text-surface-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-surface-800 dark:text-surface-100">Оформить подписку</h3>
+                  <p className="text-sm text-surface-500 dark:text-surface-400 mt-1">
+                    Получите доступ ко всем эпохам, бесконечные сердца и больше возможностей
+                  </p>
+                  <ul className="mt-3 space-y-1">
+                    <li className="flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400">
+                      <Sparkles className="w-3 h-3 text-gold-500" />
+                      <span>Все {eras.length} эпох</span>
+                    </li>
+                    <li className="flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400">
+                      <Heart className="w-3 h-3 text-red-400" />
+                      <span>Бесконечные сердца</span>
+                    </li>
+                    <li className="flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400">
+                      <Crown className="w-3 h-3 text-gold-500" />
+                      <span>Все блоки правлений</span>
+                    </li>
+                  </ul>
+                  <a
+                    href={getBotSubscribeLink()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-4 inline-flex items-center gap-2 bg-gradient-to-r from-gold-500 to-amber-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:from-gold-600 hover:to-amber-700 transition-all shadow-lg shadow-gold-500/25"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Оформить подписку
+                  </a>
+                  <p className="text-xs text-surface-400 dark:text-surface-500 mt-2">
+                    После оплаты напишите администратору для активации
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+
+        {/* ===== СТАТИСТИКА В 3 КОЛОНКИ ===== */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
           className="grid grid-cols-3 gap-2 sm:gap-3 mb-4"
         >
           <div className="card !p-3 sm:!p-4 text-center">
@@ -164,7 +247,8 @@ const ProfilePage: React.FC = () => {
             <div className="text-[10px] sm:text-xs text-surface-400 dark:text-surface-500">Дней подряд</div>
           </div>
         </motion.div>
-      {/* ===== ДОП. СТАТИСТИКА ===== */}
+
+        {/* ===== ДОП. СТАТИСТИКА ===== */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

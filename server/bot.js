@@ -12,10 +12,9 @@ const express = require('express');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
 
-// CORS middleware — чтобы Mini App мог обращаться к API бота
+// CORS middleware
 const corsMiddleware = (req, res, next) => {
   const origin = req.headers.origin || '*';
-  // Разрешаем Vercel frontend и любые Telegram Mini App
   res.setHeader('Access-Control-Allow-Origin', origin === 'null' ? '*' : origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -38,38 +37,43 @@ const config = {
   ADMIN_API_SECRET: process.env.ADMIN_API_SECRET || 'admin-secret-2024',
   API_PORT: parseInt(process.env.API_PORT || '3000'),
   
-  // ЮKassa
   YUKASSA_SHOP_ID: process.env.YUKASSA_SHOP_ID || '',
   YUKASSA_SECRET_KEY: process.env.YUKASSA_SECRET_KEY || '',
   
-  // Цены (в рублях)
-  PRICE_MONTHLY: 99, // подписка на 1 месяц
-  PRICE_UNLOCK: 199, // разблокировка всех эпох навсегда
+  PRICE_MONTHLY: 99,
+  PRICE_UNLOCK: 199,
   
-  // Внешний URL для вебхуков (для ЮKassa)
   EXTERNAL_URL: process.env.EXTERNAL_URL || '',
-  
-  // SOCKS5 прокси для Telegram API (обходит блокировки в Москве)
-  // По умолчанию: host.docker.internal:1080 (SOCKS5 на хосте VDS)
   SOCKS_PROXY: process.env.SOCKS_PROXY || 'socks5://host.docker.internal:1080',
+};
+
+// Список доступных эпох
+const AVAILABLE_ERAS = [
+  'ancient', 'kievan', 'mongol', 'moscow', 'imperial', 'soviet', 'modern'
+];
+
+const ERA_NAMES = {
+  ancient: 'Древняя Русь',
+  kievan: 'Киевская Русь',
+  mongol: 'Монгольское иго',
+  moscow: 'Московское царство',
+  imperial: 'Империя',
+  soviet: 'Советский период',
+  modern: 'Современная Россия',
 };
 
 // ======================== TELEGRAM API ========================
 
-// Используем Cloudflare Worker как прокси для Telegram API (обходит блокировки)
 const TELEGRAM_API = `https://tg-proxy.tompulpie.workers.dev/bot${config.TELEGRAM_TOKEN}`;
 
 async function tgCall(method, params = {}) {
   try {
     const url = `${TELEGRAM_API}/${method}`;
-    
     const fetchOptions = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params || {}),
     };
-    
-
     const res = await fetch(url, fetchOptions);
     const data = await res.json();
     if (!data.ok) {
@@ -101,7 +105,10 @@ async function editMessageText(chatId, messageId, text, extra = {}) {
   });
 }
 
-// ======================== ПОЛУЧЕНИЕ ОБНОВЛЕНИЙ ========================
+// ======================== POLLING ========================
+
+let pollingOffset = 0;
+let pollingActive = false;
 
 async function getUpdates(offset = 0) {
   const result = await tgCall('getUpdates', {
@@ -123,11 +130,6 @@ async function deleteWebhook() {
   return result;
 }
 
-// ======================== POLLING ========================
-
-let pollingOffset = 0;
-let pollingActive = false;
-
 async function startPolling() {
   if (pollingActive) return;
   pollingActive = true;
@@ -147,11 +149,6 @@ async function startPolling() {
       await new Promise(r => setTimeout(r, 1000));
     }
   }
-}
-
-function stopPolling() {
-  pollingActive = false;
-  console.log('🛑 Polling остановлен');
 }
 
 // ======================== КНОПКИ ========================
@@ -192,13 +189,8 @@ async function createPayment(chatId, amount, description) {
   }
 
   const idempotenceKey = crypto.randomUUID();
-  const auth = Buffer.from(
-    `${config.YUKASSA_SHOP_ID}:${config.YUKASSA_SECRET_KEY}`
-  ).toString('base64');
-
-  const callbackUrl = config.EXTERNAL_URL
-    ? `${config.EXTERNAL_URL}/api/yookassa/callback`
-    : '';
+  const auth = Buffer.from(`${config.YUKASSA_SHOP_ID}:${config.YUKASSA_SECRET_KEY}`).toString('base64');
+  const callbackUrl = config.EXTERNAL_URL ? `${config.EXTERNAL_URL}/api/yookassa/callback` : '';
 
   try {
     const res = await fetch('https://api.yookassa.ru/v3/payments', {
@@ -209,28 +201,17 @@ async function createPayment(chatId, amount, description) {
         'Idempotence-Key': idempotenceKey,
       },
       body: JSON.stringify({
-        amount: {
-          value: amount.toFixed(2),
-          currency: 'RUB',
-        },
+        amount: { value: amount.toFixed(2), currency: 'RUB' },
         capture: true,
-        confirmation: {
-          type: 'redirect',
-          return_url: config.MINI_APP_URL,
-        },
+        confirmation: { type: 'redirect', return_url: config.MINI_APP_URL },
         description: description || `Разблокировка всех эпох (chat: ${chatId})`,
-        metadata: {
-          chat_id: String(chatId),
-          type: 'unlock_all',
-        },
+        metadata: { chat_id: String(chatId), type: 'unlock_all' },
         ...(callbackUrl ? { notification_url: callbackUrl } : {}),
       }),
     });
 
     const payment = await res.json();
-
     if (payment.id) {
-      // Сохраняем платёж в БД
       await db.createPayment(chatId, payment.id, amount, 'pending');
       return payment;
     } else {
@@ -245,16 +226,10 @@ async function createPayment(chatId, amount, description) {
 
 async function getPaymentStatus(paymentId) {
   if (!config.YUKASSA_SHOP_ID || !config.YUKASSA_SECRET_KEY) return null;
-  
-  const auth = Buffer.from(
-    `${config.YUKASSA_SHOP_ID}:${config.YUKASSA_SECRET_KEY}`
-  ).toString('base64');
-
+  const auth = Buffer.from(`${config.YUKASSA_SHOP_ID}:${config.YUKASSA_SECRET_KEY}`).toString('base64');
   try {
     const res = await fetch(`https://api.yookassa.ru/v3/payments/${paymentId}`, {
-      headers: {
-        'Authorization': `Basic ${auth}`,
-      },
+      headers: { 'Authorization': `Basic ${auth}` },
     });
     return await res.json();
   } catch (err) {
@@ -268,13 +243,8 @@ async function getPaymentStatus(paymentId) {
 async function handleStart(msg) {
   const chatId = msg.chat.id;
   const firstName = msg.from?.first_name || '';
-  const lastName = msg.from?.last_name || '';
-  const username = msg.from?.username || '';
+  await db.createUser(chatId, firstName, msg.from?.last_name || '', msg.from?.username || '');
 
-  // Регистрируем пользователя
-  await db.createUser(chatId, firstName, lastName, username);
-
-  // Приветствие
   await sendMessage(
     chatId,
     `🎓 *Привет, ${firstName || 'друг'}!*\n\nЭто приложение для подготовки к ЕГЭ по истории России.\n\n📚 *Что внутри:*\n• 60+ уроков по всем эпохам\n• Интерактивные тесты и задания\n• Отслеживание прогресса\n• Система повторений\n• Статистика и достижения\n\n💎 *Тарифы:*\n▫️ *99₽/мес* — подписка на 1 месяц (все эпохи)\n▫️ *199₽* — полный доступ навсегда\n\nНажми кнопку ниже, чтобы начать! 👇`,
@@ -283,7 +253,7 @@ async function handleStart(msg) {
 }
 
 async function handleHelp(chatId) {
-  const text = 
+  await sendMessage(chatId,
     `*📖 Помощь*\n\n` +
     `• */start* — открыть главное меню\n` +
     `• */help* — эта подсказка\n\n` +
@@ -292,52 +262,37 @@ async function handleHelp(chatId) {
     `2. Выбери эпоху для изучения\n` +
     `3. Изучай даты и выполняй задания\n\n` +
     `*💎 Тарифы:*\n` +
-    `▫️ *99₽/мес* — подписка на 1 месяц (все эпохи)\n` +
+    `▫️ *99₽/мес* — подписка на 1 месяц\n` +
     `▫️ *199₽* — полный доступ навсегда\n\n` +
-    `Нажми /buy или кнопку "💎 99₽/мес — Все эпохи".\n\n` +
-    `*По вопросам:* @tema2017_ege`;
-
-  await sendMessage(chatId, text);
+    `*По вопросам:* @tema2017_ege`
+  );
 }
 
 async function handleBuy(chatId) {
   const user = await db.getUser(chatId);
   
   if (user && user.unlocked_all) {
-    await sendMessage(
-      chatId,
+    await sendMessage(chatId,
       '✅ *У вас уже есть полный доступ!*\n\nВсе эпохи разблокированы. Наслаждайтесь обучением! 🎓',
       { reply_markup: mainKeyboard() }
     );
     return;
   }
 
-  // Создаём платёж
-  const payment = await createPayment(
-    chatId,
-    config.PRICE_UNLOCK,
-    'Разблокировка всех эпох истории России'
-  );
+  const payment = await createPayment(chatId, config.PRICE_UNLOCK, 'Разблокировка всех эпох истории России');
 
   if (!payment) {
-    await sendMessage(
-      chatId,
-      '❌ *Извините, оплата временно недоступна.*\n\nПожалуйста, попробуйте позже или свяжитесь с @tema2017_ege',
-    );
+    await sendMessage(chatId, '❌ *Извините, оплата временно недоступна.*\n\nПожалуйста, попробуйте позже или свяжитесь с @tema2017_ege');
     return;
   }
 
   const paymentUrl = payment.confirmation?.confirmation_url;
   if (!paymentUrl) {
-    await sendMessage(
-      chatId,
-      '❌ *Ошибка создания платежа.* Попробуйте позже.',
-    );
+    await sendMessage(chatId, '❌ *Ошибка создания платежа.* Попробуйте позже.');
     return;
   }
 
-  await sendMessage(
-    chatId,
+  await sendMessage(chatId,
     `💎 *Оформление подписки*\n\n` +
     `▫️ *99₽/мес* — подписка на 1 месяц\n` +
     `▫️ *199₽* — полный доступ навсегда\n\n` +
@@ -345,14 +300,12 @@ async function handleBuy(chatId) {
     `✅ Древняя Русь — XX век\n` +
     `✅ 60+ уроков и 250+ дат\n` +
     `✅ Все тесты и задания\n\n` +
-    `*ID платежа:* \`${payment.id}\`\n\n` +
-    `После оплаты нажми "✅ Я оплатил" для проверки.`,
+    `*ID платежа:* \`${payment.id}\``,
     { reply_markup: payKeyboard(paymentUrl) }
   );
 }
 
 async function handleCheckPayment(chatId, paymentId) {
-  // Сначала проверяем в БД
   const payment = await db.getPayment(paymentId);
   
   if (!payment) {
@@ -360,47 +313,28 @@ async function handleCheckPayment(chatId, paymentId) {
     return;
   }
 
-  // Если уже подтверждён
   if (payment.status === 'succeeded') {
     await db.setUnlocked(chatId, true);
-    await sendMessage(
-      chatId,
-      '✅ *Оплата подтверждена!*\n\nВсе эпохи разблокированы! 🎉\nНажми кнопку ниже, чтобы начать:',
-      { reply_markup: mainKeyboard() }
-    );
+    await sendMessage(chatId, '✅ *Оплата подтверждена!*\n\nВсе эпохи разблокированы! 🎉\nНажми кнопку ниже, чтобы начать:', { reply_markup: mainKeyboard() });
     return;
   }
 
-  // Проверяем статус в ЮKassa
   const yooPayment = await getPaymentStatus(paymentId);
   
   if (yooPayment && yooPayment.status === 'succeeded') {
     await db.updatePaymentStatus(paymentId, 'succeeded');
     await db.setUnlocked(chatId, true);
+    await sendMessage(chatId, '✅ *Оплата подтверждена! СПАСИБО!* 🎉\n\nВсе эпохи разблокированы.\nНажми кнопку ниже, чтобы начать обучение:', { reply_markup: mainKeyboard() });
     
-    await sendMessage(
-      chatId,
-      '✅ *Оплата подтверждена! СПАСИБО!* 🎉\n\nВсе эпохи разблокированы.\nНажми кнопку ниже, чтобы начать обучение:',
-      { reply_markup: mainKeyboard() }
-    );
-    
-    // Уведомление админу
     if (config.ADMIN_ID) {
       const user = await db.getUser(chatId);
       const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || '—';
       const username = user?.username ? `@${user?.username}` : '—';
-      
-      await sendMessage(
-        config.ADMIN_ID,
-        `💰 *Новая оплата!*\n\nПользователь: ${name} (${username})\nChat ID: \`${chatId}\`\nСумма: ${payment.amount}₽\nПлатёж: \`${paymentId}\``
-      );
+      await sendMessage(config.ADMIN_ID, `💰 *Новая оплата!*\n\nПользователь: ${name} (${username})\nChat ID: \`${chatId}\`\nСумма: ${payment.amount}₽\nПлатёж: \`${paymentId}\``);
     }
   } else {
     const status = yooPayment?.status || 'неизвестно';
-    await sendMessage(
-      chatId,
-      `⏳ *Платёж ещё не подтверждён.*\n\nСтатус: \`${status}\`\n\nЕсли вы уже оплатили, попробуйте проверить через минуту.\nЕсли проблема не решается — напишите @tema2017_ege\n\nID платежа: \`${paymentId}\``
-    );
+    await sendMessage(chatId, `⏳ *Платёж ещё не подтверждён.*\n\nСтатус: \`${status}\`\n\nЕсли вы уже оплатили, попробуйте проверить через минуту.\nID платежа: \`${paymentId}\``);
   }
 }
 
@@ -418,14 +352,19 @@ async function handleAdmin(msg) {
 
   const helpText = 
     `*🛠 Админ-панель*\n\n` +
+    `*/admin* — это меню\n` +
     `*/admin stats* — статистика\n` +
+    `*/admin users* — список пользователей\n` +
     `*/admin unlock <chatId>* — разблокировать все эпохи\n` +
     `*/admin lock <chatId>* — забрать разблокировку\n` +
-    `*/admin broadcast <текст>* — разослать сообщение\n` +
-    `*/admin users* — список пользователей\n` +
-    `*/admin webhook* — переустановить webhook\n` +
+    `*/admin unlock_era <chatId> <eraId>* — открыть эпоху\n` +
+    `*/admin lock_era <chatId> <eraId>* — закрыть эпоху\n` +
+    `*/admin eras <chatId>* — список открытых эпох\n` +
+    `*/admin broadcast <текст>* — рассылка\n` +
     `*/admin check <paymentId>* — проверить платёж\n` +
-    `*/admin testpay <chatId>* — имитировать оплату (для теста)`;
+    `*/admin testpay <chatId>* — тестовая оплата\n\n` +
+    `*Доступные eraId:*\n` +
+    AVAILABLE_ERAS.map(e => `• \`${e}\` — ${ERA_NAMES[e]}`).join('\n');
 
   if (!command) {
     return sendMessage(chatId, helpText);
@@ -437,7 +376,7 @@ async function handleAdmin(msg) {
     return sendMessage(chatId,
       `*📊 Статистика*\n\n` +
       `👥 Всего пользователей: *${stats.total}*\n` +
-      `🌟 С разблокировкой: *${stats.unlocked}*\n` +
+      `🌟 С полной разблокировкой: *${stats.unlocked}*\n` +
       `⚡ Активных сегодня: *${stats.active_today}*`
     );
   }
@@ -453,18 +392,15 @@ async function handleAdmin(msg) {
       const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || '—';
       const username = u.username ? `@${u.username}` : '—';
       const unlocked = u.unlocked_all ? ' ✅' : '';
-      const activity = u.last_activity 
-        ? new Date(u.last_activity).toLocaleDateString('ru-RU') 
-        : '—';
-      return `• \`${u.chat_id}\` ${name} (${username})${unlocked} [${activity}]`;
+      const eras = u.unlocked_eras?.length ? ` [${u.unlocked_eras.length} эпох]` : '';
+      const activity = u.last_activity ? new Date(u.last_activity).toLocaleDateString('ru-RU') : '—';
+      return `• \`${u.chat_id}\` ${name} (${username})${unlocked}${eras} [${activity}]`;
     }).join('\n');
 
-    return sendMessage(chatId, 
-      `*👥 Пользователи (${users.length}):*\n\n${list}`
-    );
+    return sendMessage(chatId, `*👥 Пользователи (${users.length}):*\n\n${list}`);
   }
 
-  // ===== РАЗБЛОКИРОВАТЬ =====
+  // ===== РАЗБЛОКИРОВАТЬ ВСЕ =====
   if (command === 'unlock') {
     const targetId = parseInt(args[1]);
     if (!targetId) {
@@ -473,13 +409,10 @@ async function handleAdmin(msg) {
 
     await db.createUser(targetId, '', '', '');
     await db.setUnlocked(targetId, true);
-    await sendMessage(chatId, `✅ Эпохи разблокированы для \`${targetId}\``);
+    await sendMessage(chatId, `✅ Все эпохи разблокированы для \`${targetId}\``);
 
     try {
-      await sendMessage(targetId,
-        `🎉 *Все эпохи разблокированы!*\n\nТебе открыты все уроки и материалы. Нажми кнопку ниже, чтобы начать:`,
-        { reply_markup: mainKeyboard() }
-      );
+      await sendMessage(targetId, `🎉 *Все эпохи разблокированы!*\n\nНажми кнопку ниже, чтобы начать:`, { reply_markup: mainKeyboard() });
     } catch {
       await sendMessage(chatId, `⚠️ Не удалось уведомить пользователя \`${targetId}\``);
     }
@@ -494,6 +427,83 @@ async function handleAdmin(msg) {
     }
     await db.setUnlocked(targetId, false);
     return sendMessage(chatId, `✅ Разблокировка отозвана для \`${targetId}\``);
+  }
+
+  // ===== ОТКРЫТЬ ОТДЕЛЬНУЮ ЭПОХУ =====
+  if (command === 'unlock_era') {
+    const targetId = parseInt(args[1]);
+    const eraId = args[2]?.toLowerCase();
+    
+    if (!targetId || !eraId) {
+      return sendMessage(chatId, '❌ Укажи chatId и eraId: \`/admin unlock_era 123456789 ancient\`');
+    }
+    
+    if (!AVAILABLE_ERAS.includes(eraId)) {
+      return sendMessage(chatId, `❌ Неизвестная эпоха \`${eraId}\`.\nДоступные: ${AVAILABLE_ERAS.map(e => `\`${e}\``).join(', ')}`);
+    }
+
+    await db.createUser(targetId, '', '', '');
+    await db.unlockEra(targetId, eraId);
+    
+    const eraName = ERA_NAMES[eraId] || eraId;
+    await sendMessage(chatId, `✅ Эпоха *${eraName}* открыта для \`${targetId}\``);
+
+    try {
+      await sendMessage(targetId, `🎉 *Эпоха "${eraName}" открыта!*\n\nНажми кнопку ниже, чтобы начать:`, { reply_markup: mainKeyboard() });
+    } catch {
+      await sendMessage(chatId, `⚠️ Не удалось уведомить пользователя \`${targetId}\``);
+    }
+    return;
+  }
+
+  // ===== ЗАКРЫТЬ ОТДЕЛЬНУЮ ЭПОХУ =====
+  if (command === 'lock_era') {
+    const targetId = parseInt(args[1]);
+    const eraId = args[2]?.toLowerCase();
+    
+    if (!targetId || !eraId) {
+      return sendMessage(chatId, '❌ Укажи chatId и eraId: \`/admin lock_era 123456789 ancient\`');
+    }
+
+    await db.lockEra(targetId, eraId);
+    
+    const eraName = ERA_NAMES[eraId] || eraId;
+    return sendMessage(chatId, `✅ Эпоха *${eraName}* закрыта для \`${targetId}\``);
+  }
+
+  // ===== СПИСОК ОТКРЫТЫХ ЭПОХ ПОЛЬЗОВАТЕЛЯ =====
+  if (command === 'eras') {
+    const targetId = parseInt(args[1]);
+    if (!targetId) {
+      return sendMessage(chatId, '❌ Укажи chatId: \`/admin eras 123456789\`');
+    }
+
+    const user = await db.getUser(targetId);
+    if (!user) {
+      return sendMessage(chatId, `❌ Пользователь \`${targetId}\` не найден.`);
+    }
+
+    const unlockedEras = await db.getUnlockedEras(targetId);
+    const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || '—';
+    
+    let text = `*📜 Эпохи пользователя ${name} (\`${targetId}\`)*\n\n`;
+    
+    if (user.unlocked_all) {
+      text += `✅ *Полная разблокировка* — все эпохи открыты\n`;
+    }
+    
+    if (unlockedEras.length > 0) {
+      text += `\n*Отдельно открытые эпохи:*\n`;
+      for (const era of unlockedEras) {
+        text += `• ${ERA_NAMES[era] || era} (\`${era}\`)\n`;
+      }
+    }
+    
+    if (!user.unlocked_all && unlockedEras.length === 0) {
+      text += `🔒 Нет открытых эпох (только бесплатные)`;
+    }
+
+    return sendMessage(chatId, text);
   }
 
   // ===== РАССЫЛКА =====
@@ -525,18 +535,7 @@ async function handleAdmin(msg) {
       }
     }
 
-    return sendMessage(chatId,
-      `✅ Рассылка завершена!\n📨 Отправлено: *${sent}*\n❌ Ошибок: *${failed}*`
-    );
-  }
-
-  // ===== ПЕРЕУСТАНОВИТЬ WEBHOOK =====
-  if (command === 'webhook') {
-    const result = await setWebhook();
-    return sendMessage(chatId, result.ok 
-      ? '✅ Webhook переустановлен' 
-      : `❌ Ошибка: ${result.description}`
-    );
+    return sendMessage(chatId, `✅ Рассылка завершена!\n📨 Отправлено: *${sent}*\n❌ Ошибок: *${failed}*`);
   }
 
   // ===== ПРОВЕРИТЬ ПЛАТЁЖ =====
@@ -576,17 +575,14 @@ async function handleAdmin(msg) {
     await sendMessage(chatId, `✅ Тестовая оплата для \`${targetId}\` выполнена`);
 
     try {
-      await sendMessage(targetId,
-        `🎉 *Полный доступ активирован!*\n\nВсе эпохи разблокированы. Нажми кнопку ниже, чтобы начать:`,
-        { reply_markup: mainKeyboard() }
-      );
+      await sendMessage(targetId, `🎉 *Полный доступ активирован!*\n\nВсе эпохи разблокированы. Нажми кнопку ниже, чтобы начать:`, { reply_markup: mainKeyboard() });
     } catch {
       await sendMessage(chatId, `⚠️ Не удалось уведомить пользователя \`${targetId}\``);
     }
     return;
   }
 
-  return sendMessage(chatId, '❌ Неизвестная команда.');
+  return sendMessage(chatId, helpText);
 }
 
 // ======================== ОБРАБОТКА СООБЩЕНИЙ ========================
@@ -600,20 +596,14 @@ async function processUpdate(update) {
       const messageId = cb.message.message_id;
       const data = cb.data || '';
 
-      // Подтверждаем получение callback
       await tgCall('answerCallbackQuery', { callback_query_id: cb.id });
 
       if (data === 'back_main') {
-        await editMessageText(chatId, messageId, 
-          '🚀 *Главное меню*\n\nВыберите действие:',
-          { reply_markup: mainMenuKeyboard() }
-        );
+        await editMessageText(chatId, messageId, '🚀 *Главное меню*\n\nВыберите действие:', { reply_markup: mainMenuKeyboard() });
       } else if (data === 'buy_access') {
         await editMessageText(chatId, messageId, '⏳ Создаю платёж...');
         await handleBuy(chatId);
       } else if (data === 'help') {
-        await editMessageText(chatId, messageId, '⏳ Загружаю...');
-        // Сначала отправляем новое сообщение с помощью
         await sendMessage(chatId,
           `*📖 Помощь*\n\n` +
           `Нажми "🚀 Запустить Mini App", чтобы открыть приложение.\n\n` +
@@ -634,19 +624,32 @@ async function processUpdate(update) {
       const text = (msg.text || '').trim();
       const from = msg.from;
       
-      // Регистрируем/обновляем пользователя при любом сообщении
       if (from) {
-        await db.createUser(
-          chatId, 
-          from.first_name || '', 
-          from.last_name || '', 
-          from.username || ''
-        );
+        await db.createUser(chatId, from.first_name || '', from.last_name || '', from.username || '');
       }
 
-      // === Команды ===
-      if (text === '/start' || text.startsWith('/start ')) {
+      if (text === '/start') {
         await handleStart(msg);
+      } else if (text.startsWith('/start ')) {
+        const payload = text.substring(7).trim();
+        if (payload.startsWith('subscribe_')) {
+          const user = await db.getUser(chatId);
+          if (user && user.unlocked_all) {
+            await sendMessage(chatId, '✅ *У вас уже есть подписка!*\n\nВсе эпохи разблокированы.', { reply_markup: mainKeyboard() });
+          } else {
+            await sendMessage(chatId,
+              `🎓 *Оформление подписки*\n\n` +
+              `💎 *Стоимость:* 99₽/месяц\n\n` +
+              `*Как оплатить:*\n` +
+              `1. Переведите 99₽ на карту *2202 2024 1234 5678* (Сбер)\n` +
+              `2. Или напишите @tema2017_ege\n` +
+              `3. После оплаты администратор активирует подписку вручную`,
+              { reply_markup: payKeyboard('') }
+            );
+          }
+        } else {
+          await handleStart(msg);
+        }
       } else if (text === '/help') {
         await handleHelp(chatId);
       } else if (text === '/buy' || text === '/pay') {
@@ -661,14 +664,10 @@ async function processUpdate(update) {
       } else if (text.startsWith('/admin')) {
         await handleAdmin(msg);
       } else if (text.startsWith('/')) {
-        await sendMessage(chatId, 
-          '❌ Неизвестная команда. Используй /start или /help'
-        );
+        await sendMessage(chatId, '❌ Неизвестная команда. Используй /start или /help');
       } else {
-        // Любое сообщение — показываем меню
         await sendMessage(chatId,
-          '🚀 *Главное меню*\n\nИспользуй команды:\n' +
-          '/start — начать\n/help — помощь\n/buy — купить доступ',
+          '🚀 *Главное меню*\n\nИспользуй команды:\n/start — начать\n/help — помощь\n/buy — купить доступ',
           { reply_markup: mainKeyboard() }
         );
       }
@@ -682,7 +681,6 @@ async function processUpdate(update) {
 
 const app = express();
 
-// Парсинг JSON (кроме вебхуков Telegram — они приходят в text/plain)
 app.use('/api', corsMiddleware);
 app.use('/api', express.json());
 app.use('/webhook', express.text({ type: 'text/plain' }));
@@ -691,7 +689,6 @@ app.use('/', corsMiddleware);
 
 // ===== API для Mini App =====
 
-// Проверка статуса пользователя (для Mini App)
 app.get('/api/check-access', corsMiddleware, async (req, res) => {
   const chatId = parseInt(req.query.chat_id);
   const secret = req.query.secret;
@@ -700,16 +697,18 @@ app.get('/api/check-access', corsMiddleware, async (req, res) => {
     return res.json({ ok: false, error: 'chat_id required' });
   }
 
-  // Проверка секрета (необязательно, но желательно)
   if (secret && secret !== config.ADMIN_API_SECRET) {
     return res.json({ ok: false, error: 'invalid secret' });
   }
 
   try {
     const user = await db.getUser(chatId);
+    const unlockedEras = await db.getUnlockedEras(chatId);
+    
     return res.json({
       ok: true,
       unlocked: user ? user.unlocked_all : false,
+      unlocked_eras: unlockedEras,
       user: user ? {
         chat_id: user.chat_id,
         first_name: user.first_name,
@@ -718,6 +717,7 @@ app.get('/api/check-access', corsMiddleware, async (req, res) => {
         first_seen: user.first_seen,
         last_activity: user.last_activity,
         unlocked_all: user.unlocked_all,
+        unlocked_eras: unlockedEras,
       } : null,
     });
   } catch (err) {
@@ -725,7 +725,6 @@ app.get('/api/check-access', corsMiddleware, async (req, res) => {
   }
 });
 
-// Разблокировка через API (для интеграции с Mini App)
 app.post('/api/unlock', express.json(), async (req, res) => {
   const { chat_id, secret } = req.body;
 
@@ -746,7 +745,6 @@ app.post('/api/unlock', express.json(), async (req, res) => {
   }
 });
 
-// Статистика для админ-панели Mini App
 app.get('/api/stats', async (req, res) => {
   const secret = req.query.secret;
   if (secret !== config.ADMIN_API_SECRET) {
@@ -765,7 +763,7 @@ app.get('/api/stats', async (req, res) => {
 
 app.post('/api/yookassa/callback', async (req, res) => {
   try {
-    const { object, event } = req.body;
+    const { object } = req.body;
     
     if (!object || !object.id) {
       return res.status(400).json({ error: 'invalid payload' });
@@ -779,28 +777,16 @@ app.post('/api/yookassa/callback', async (req, res) => {
     console.log(`🔔 ЮKassa callback: ${paymentId} -> ${status}`);
 
     if (status === 'succeeded' && chatId) {
-      // Обновляем статус платежа
       await db.updatePaymentStatus(paymentId, 'succeeded');
-      
-      // Разблокируем пользователя
       await db.setUnlocked(chatId, true);
 
-      // Уведомление пользователю
-      await sendMessage(chatId,
-        '✅ *Оплата прошла успешно! СПАСИБО!* 🎉\n\nВсе эпохи разблокированы.\nНажми кнопку ниже, чтобы начать:',
-        { reply_markup: mainKeyboard() }
-      );
+      await sendMessage(chatId, '✅ *Оплата прошла успешно! СПАСИБО!* 🎉\n\nВсе эпохи разблокированы.\nНажми кнопку ниже, чтобы начать:', { reply_markup: mainKeyboard() });
 
-      // Уведомление админу
       if (config.ADMIN_ID) {
         const user = await db.getUser(chatId);
         const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || '—';
         const username = user?.username ? `@${user?.username}` : '—';
-        
-        await sendMessage(
-          config.ADMIN_ID,
-          `💰 *Новая оплата (авто)!*\n\nПользователь: ${name} (${username})\nChat ID: \`${chatId}\`\nСумма: ${object.amount?.value || '?'}₽\nПлатёж: \`${paymentId}\``
-        );
+        await sendMessage(config.ADMIN_ID, `💰 *Новая оплата (авто)!*\n\nПользователь: ${name} (${username})\nChat ID: \`${chatId}\`\nСумма: ${object.amount?.value || '?'}₽\nПлатёж: \`${paymentId}\``);
       }
     } else if (status === 'canceled') {
       await db.updatePaymentStatus(paymentId, 'canceled');
@@ -809,13 +795,11 @@ app.post('/api/yookassa/callback', async (req, res) => {
     res.status(200).json({ ok: true });
   } catch (err) {
     console.error('❌ ЮKassa callback error:', err.message);
-    res.status(200).json({ ok: true }); // Always return 200 to ЮKassa
+    res.status(200).json({ ok: true });
   }
 });
 
-// ===== Прокси для Telegram API (обходит блокировки) =====
-// Используется, когда TG_API_URL = http://localhost:3000/tg-proxy
-// Принимает POST с JSON { method, params } и отправляет запрос к api.telegram.org
+// ===== Прокси для Telegram API =====
 
 app.post('/tg-proxy', async (req, res) => {
   try {
@@ -835,7 +819,6 @@ app.post('/tg-proxy', async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params || {}),
-      // Таймаут 30 секунд для long polling
       signal: AbortSignal.timeout(35000),
     });
 
@@ -847,7 +830,7 @@ app.post('/tg-proxy', async (req, res) => {
   }
 });
 
-// ===== Webhook от Telegram (не используется, оставлен для совместимости) =====
+// ===== Webhook от Telegram =====
 
 app.post('/webhook', async (req, res) => {
   res.status(200).json({ ok: true });
@@ -858,7 +841,7 @@ app.post('/webhook', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '2.0.0',
+    version: '2.1.0',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     bot: config.BOT_USERNAME,
@@ -868,7 +851,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'History EGE Bot',
-    version: '2.0.0',
+    version: '2.1.0',
     endpoints: {
       webhook: 'POST /webhook',
       checkAccess: 'GET /api/check-access',
@@ -886,14 +869,13 @@ async function start() {
   const port = config.API_PORT || 3000;
   
   app.listen(port, '0.0.0.0', async () => {
-    console.log(`\n🤖 History EGE Bot v2.0.0`);
+    console.log(`\n🤖 History EGE Bot v2.1.0`);
     console.log(`📡 Сервер запущен на порту ${port}`);
     console.log(`🆔 Бот: @${config.BOT_USERNAME}`);
     console.log(`🔗 Mini App: ${config.MINI_APP_URL}`);
     console.log(`💰 ЮKassa: ${config.YUKASSA_SHOP_ID ? 'настроена' : 'НЕ настроена'}`);
     console.log(`💾 PostgreSQL: ${process.env.DATABASE_URL ? 'есть' : 'НЕТ'}`);
     
-    // Удаляем webhook и переключаемся на polling
     if (config.TELEGRAM_TOKEN) {
       await deleteWebhook();
       startPolling();
@@ -901,7 +883,6 @@ async function start() {
   });
 }
 
-// Обработка сигналов завершения
 process.on('SIGTERM', () => {
   console.log('🛑 Получен SIGTERM, завершаю работу...');
   process.exit(0);

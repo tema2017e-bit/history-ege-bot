@@ -41,8 +41,8 @@ async function getAllUsers() {
 
 async function createUser(chatId, firstName, lastName, username) {
   const result = await query(
-    `INSERT INTO users (chat_id, first_name, last_name, username, unlocked_all)
-     VALUES ($1, $2, $3, $4, false)
+    `INSERT INTO users (chat_id, first_name, last_name, username, unlocked_all, unlocked_eras)
+     VALUES ($1, $2, $3, $4, false, '[]'::jsonb)
      ON CONFLICT (chat_id) DO UPDATE SET
        last_activity = NOW(),
        first_name = COALESCE(NULLIF($2, ''), users.first_name),
@@ -65,6 +65,42 @@ async function setUnlocked(chatId, value) {
   await query(
     'UPDATE users SET unlocked_all = $2 WHERE chat_id = $1',
     [chatId, value]
+  );
+}
+
+// Работа с отдельными эпохами
+
+async function getUnlockedEras(chatId) {
+  const result = await query(
+    'SELECT unlocked_eras FROM users WHERE chat_id = $1',
+    [chatId]
+  );
+  if (!result.rows[0]) return [];
+  return result.rows[0].unlocked_eras || [];
+}
+
+async function unlockEra(chatId, eraId) {
+  await query(
+    `UPDATE users 
+     SET unlocked_eras = (
+       CASE 
+         WHEN unlocked_eras @> $2::jsonb THEN unlocked_eras
+         ELSE unlocked_eras || $2::jsonb
+       END
+     ),
+     updated_at = NOW()
+     WHERE chat_id = $1`,
+    [chatId, JSON.stringify([eraId])]
+  );
+}
+
+async function lockEra(chatId, eraId) {
+  await query(
+    `UPDATE users 
+     SET unlocked_eras = unlocked_eras - $2,
+     updated_at = NOW()
+     WHERE chat_id = $1`,
+    [chatId, eraId]
   );
 }
 
@@ -119,6 +155,9 @@ module.exports = {
   createUser,
   updateLastActivity,
   setUnlocked,
+  getUnlockedEras,
+  unlockEra,
+  lockEra,
   getStats,
   createPayment,
   updatePaymentStatus,

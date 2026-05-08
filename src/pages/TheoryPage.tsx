@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, Calendar, Users, ScrollText, Lightbulb, Link2, Target, ChevronDown, ChevronRight, Search, GraduationCap } from 'lucide-react';
+import { BookOpen, Calendar, Users, ScrollText, Lightbulb, Link2, Target, ChevronDown, ChevronRight, Search, GraduationCap, Sparkles, Lock } from 'lucide-react';
 import { TopBar } from '../components/ui/TopBar';
+import { useStore, FREE_ERAS_COUNT } from '../store/useStore';
 import { theorySections } from '../data/theoryData';
 import type { TheoryTopic } from '../types';
 
@@ -10,6 +11,9 @@ const TheoryPage: React.FC = () => {
   const [expandedTopics, setExpandedTopics] = useState<Set<string>>(new Set());
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
 
+  const subscription = useStore(s => s.subscription);
+  const navigateSub = () => window.location.href = '/profile';
+
   const filteredSections = useMemo(() => {
     if (!searchQuery.trim()) return theorySections;
     
@@ -17,16 +21,23 @@ const TheoryPage: React.FC = () => {
     return theorySections
       .map(section => ({
         ...section,
-        topics: section.topics.filter(topic =>
-          topic.title.toLowerCase().includes(q) ||
-          topic.timeRange.toLowerCase().includes(q) ||
-          topic.content.keyDates?.some(d => d.year.includes(q) || d.event.toLowerCase().includes(q)) ||
-          topic.content.terms?.some(t => t.term.toLowerCase().includes(q)) ||
-          topic.content.persons?.some(p => p.name.toLowerCase().includes(q))
-        ),
+        topics: section.topics.filter(topic => {
+          if (!topic.title.toLowerCase().includes(q) && !(topic.timeRange || '').toLowerCase().includes(q)) return false;
+          if (typeof topic.content === 'string') return true;
+          return (
+            topic.content.keyDates?.some(d => d.year.includes(q) || d.event.toLowerCase().includes(q)) ||
+            topic.content.terms?.some(t => t.term.toLowerCase().includes(q)) ||
+            topic.content.persons?.some(p => p.name.toLowerCase().includes(q))
+          );
+        }),
       }))
       .filter(section => section.topics.length > 0);
   }, [searchQuery]);
+
+  const isSectionLocked = (sectionIndex: number) => {
+    if (subscription) return false;
+    return sectionIndex >= FREE_ERAS_COUNT;
+  };
 
   const toggleTopic = (id: string) => {
     setExpandedTopics(prev => {
@@ -87,16 +98,18 @@ const TheoryPage: React.FC = () => {
 
         {/* Разделы */}
         <div className="space-y-4">
-          {filteredSections.map(section => (
+          {filteredSections.map((section, sectionIndex) => {
+            const locked = isSectionLocked(sectionIndex);
+            return (
             <motion.div
               key={section.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white dark:bg-surface-800 rounded-2xl overflow-hidden border border-surface-200 dark:border-surface-700"
+              className={`bg-white dark:bg-surface-800 rounded-2xl overflow-hidden border ${locked ? 'border-amber-300 dark:border-amber-700' : 'border-surface-200 dark:border-surface-700'}`}
             >
               {/* Заголовок раздела */}
               <button
-                onClick={() => toggleSection(section.id)}
+                onClick={() => !locked && toggleSection(section.id)}
                 className="w-full flex items-center gap-3 p-4 bg-white dark:bg-surface-800 hover:bg-surface-50 dark:hover:bg-surface-700 transition-colors focus:outline-none focus-visible:outline-none"
               >
                 <div
@@ -106,24 +119,29 @@ const TheoryPage: React.FC = () => {
                   {section.icon}
                 </div>
                 <div className="flex-1 text-left">
-                  <h2 className="font-semibold text-surface-800 dark:text-surface-100">
+                  <h2 className="font-semibold text-surface-800 dark:text-surface-100 flex items-center gap-2">
                     {section.title}
+                    {locked && <Lock className="w-4 h-4 text-amber-500" />}
                   </h2>
                   <p className="text-xs text-surface-400 dark:text-surface-500 mt-0.5">
                     {section.yearRange} • {section.topics.length} {section.topics.length === 1 ? 'тема' : 'темы'}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-16 h-1.5 rounded-full bg-surface-200 dark:bg-surface-700 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{
-                        width: `${getSectionProgress(section)}%`,
-                        backgroundColor: section.color,
-                      }}
-                    />
-                  </div>
-                  {expandedSections.has(section.id) ? (
+                  {!locked && (
+                    <div className="w-16 h-1.5 rounded-full bg-surface-200 dark:bg-surface-700 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${getSectionProgress(section)}%`,
+                          backgroundColor: section.color,
+                        }}
+                      />
+                    </div>
+                  )}
+                  {locked ? (
+                    <Lock className="w-5 h-5 text-amber-500" />
+                  ) : expandedSections.has(section.id) ? (
                     <ChevronDown className="w-5 h-5 text-surface-400" />
                   ) : (
                     <ChevronRight className="w-5 h-5 text-surface-400" />
@@ -131,14 +149,37 @@ const TheoryPage: React.FC = () => {
                 </div>
               </button>
 
+              {/* Заблокировано — показываем баннер */}
+              {locked && (
+                <div className="px-4 pb-4">
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/30">
+                    <Lock className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                        Раздел доступен по подписке
+                      </p>
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+                        Откройте доступ ко всей теории
+                      </p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigateSub(); }}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition-colors flex-shrink-0"
+                    >
+                      Открыть
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Темы раздела */}
-              {expandedSections.has(section.id) && (
+              {!locked && expandedSections.has(section.id) && (
                 <div className="border-t border-surface-100 dark:border-surface-700">
                   {section.topics.map(topic => (
                     <TopicCard
                       key={topic.id}
                       topic={topic}
-                      sectionColor={section.color}
+                      sectionColor={section.color || '#6B7280'}
                       isExpanded={expandedTopics.has(topic.id)}
                       onToggle={() => toggleTopic(topic.id)}
                     />
@@ -146,7 +187,8 @@ const TheoryPage: React.FC = () => {
                 </div>
               )}
             </motion.div>
-          ))}
+          );
+          })}
 
           {filteredSections.length === 0 && (
             <div className="text-center py-12">
@@ -169,6 +211,7 @@ const TopicCard: React.FC<{
   onToggle: () => void;
 }> = ({ topic, sectionColor, isExpanded, onToggle }) => {
   const { content } = topic;
+  const isStringContent = typeof content === 'string';
 
   return (
     <div>
@@ -190,7 +233,15 @@ const TopicCard: React.FC<{
         )}
       </button>
 
-      {isExpanded && (
+      {isExpanded && isStringContent && (
+        <div className="px-4 pb-4">
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            <p className="text-sm text-surface-600 dark:text-surface-300 whitespace-pre-line">{content}</p>
+          </div>
+        </div>
+      )}
+
+      {isExpanded && !isStringContent && content && (
         <div className="px-4 pb-4 space-y-4">
           {/* Правители */}
           {content.rulers && content.rulers.length > 0 && (

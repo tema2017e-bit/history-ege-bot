@@ -8,7 +8,7 @@ import { reignClusters } from '../data/reigns';
 import { getNewlyUnlockedAchievements } from '../data/achievements';
 
 // ==================== FREEMIUM ====================
-// Бесплатно доступны первые 5 эпох (Древняя Русь, Раздробленность, Монгольское иго,
+// Бсплатно доступны первые 5 эпох (Древняя Русь, Раздробленность, Монгольское иго,
 // Образование Московского государства, Царствование Ивана Грозного)
 export const FREE_ERAS_COUNT = 5;
 // Адрес бота (сервер подписок)
@@ -16,13 +16,13 @@ const BOT_API_URL = import.meta.env.VITE_BOT_API_URL || 'https://history-ege-bot
 
 // Кеш статуса подписки (на 5 минут)
 let lastSubscriptionCheck = 0;
-let cachedSubscriptionResult: { subscription: boolean; freeEras: number } | null = null;
+let cachedSubscriptionResult: { subscription: boolean; freeEras: number; unlockedEras: string[] } | null = null;
 
 /**
  * Получить статус подписки с сервера бота
  * Проверяет через /api/check-access бота, есть ли у пользователя unlocked_all
  */
-export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Promise<{ subscription: boolean; freeEras: number }> {
+export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Promise<{ subscription: boolean; freeEras: number; unlockedEras: string[] }> {
   const now = Date.now();
   if (cachedSubscriptionResult && (now - lastSubscriptionCheck) < 5 * 60 * 1000) {
     return cachedSubscriptionResult;
@@ -31,7 +31,7 @@ export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Prom
   try {
     const chatId = tgUser?.id;
     if (!chatId) {
-      return { subscription: false, freeEras: FREE_ERAS_COUNT };
+      return { subscription: false, freeEras: FREE_ERAS_COUNT, unlockedEras: [] };
     }
 
     // Используем API бота для проверки доступа
@@ -46,6 +46,7 @@ export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Prom
     const result = {
       subscription: data.unlocked === true,
       freeEras: FREE_ERAS_COUNT,
+      unlockedEras: data.unlocked_eras || [],
     };
     
     cachedSubscriptionResult = result;
@@ -53,7 +54,7 @@ export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Prom
     return result;
   } catch {
     // Если сервер недоступен — считаем пользователя без подписки
-    return { subscription: false, freeEras: FREE_ERAS_COUNT };
+    return { subscription: false, freeEras: FREE_ERAS_COUNT, unlockedEras: [] };
   }
 }
 
@@ -68,7 +69,8 @@ function getTelegramInitData(): string | null {
 }
 
 // Ключ изменён для принудительного сброса старых битых данных
-const STORAGE_KEY = 'history-ege-state-v3';
+// v5: сброс кеша из-за новой системы подписки (version 3)
+const STORAGE_KEY = 'history-ege-state-v5';
 const HEART_RECOVERY_INTERVAL = 30 * 60 * 1000; // 30 минут в мс
 
 // ==================== НОВАЯ СИСТЕМА ПРОГРЕССИИ ЭПОХ ====================
@@ -93,14 +95,15 @@ function getDiagnosticErasForTarget(targetEraIndex: number): string[] {
   return eras.slice(0, targetEraIndex).map(e => e.id);
 }
 
-// Порог прохождения диагностики (70%)
+// Порог прохождения диагостики (70%)
 const DIAGNOSTIC_PASS_THRESHOLD = 70;
 
 function getInitialState(): AppState {
-  // Разблокированы первые FREE_ERAS_COUNT эпох бесплатно
-  const unlockedEras = eras.slice(0, FREE_ERAS_COUNT).map(e => e.id);
+  // Разблокирована только ПЕРВАЯ эпоха бесплатно
+  // Остальные открываются последовательно при прохождении (до FREE_ERAS_COUNT)
+  const unlockedEras = [eras[0]?.id].filter(Boolean);
   
-  // Разблокируем первые уроки для первой эпохи
+  // Разблокируем первый урок первой эпохи
   const unlockedLessons: string[] = ['l1'];
   const firstEra = eras[0];
   if (firstEra && firstEra.lessonIds.length > 0) {
@@ -147,12 +150,18 @@ function getInitialState(): AppState {
     diagnosticResults: {},
     attemptedDiagnostics: [],
     unlockedAllByAdmin: false,
+    subscription: false, // флаг активной подписки
   };
 }
 
 // Принудительно синхронизирует сердца с учётом прошедшего времени.
 // Вызывается при каждом возможном взаимодействии с сердцами.
 function applyHeartRecovery(state: AppState): AppState {
+  // Если есть подписка — сердца бесконечные, восстановление не нужно
+  if (state.subscription || state.unlockedAllByAdmin) {
+    return { ...state, hearts: state.maxHearts, lastHeartRecoveryAt: Date.now() };
+  }
+  
   if (state.hearts >= state.maxHearts) {
     return { ...state, lastHeartRecoveryAt: Date.now(), recoveryPracticeCompleted: false };
   }
@@ -177,6 +186,8 @@ function applyHeartRecovery(state: AppState): AppState {
 
 // Время до следующего сердца в мс
 function getTimeUntilNextHeart(state: AppState): number {
+  // По подписке сердца бесконечные — таймер не нужен
+  if (state.subscription || state.unlockedAllByAdmin) return 0;
   if (state.hearts >= state.maxHearts) return 0;
   const lastAt = state.lastHeartRecoveryAt || Date.now();
   const nextAt = lastAt + HEART_RECOVERY_INTERVAL;
@@ -255,6 +266,8 @@ type StoreActions = {
   submitDiagnosticResult: (targetEraId: string, score: number) => boolean;
   canAttemptDiagnostic: (eraId: string) => boolean;
   getDiagnosticProgress: () => Record<string, { score: number; passedAt: number }>;
+  // === ПОДПИСКА ===
+  setSubscription: (active: boolean) => void;
 };
 
 export const useStore = create<AppState & StoreActions>()(
@@ -293,6 +306,8 @@ export const useStore = create<AppState & StoreActions>()(
 
       canStartLesson: () => {
         const s = get();
+        // Если есть подписка — можно начинать урок всегда
+        if (s.subscription || s.unlockedAllByAdmin) return true;
         const recovered = applyHeartRecovery(s);
         return recovered.hearts > 0;
       },
@@ -345,7 +360,9 @@ export const useStore = create<AppState & StoreActions>()(
         }
 
         // В режиме практики сердца НЕ отнимаются
-        if (!correct && !isPractice) {
+        // При активной подписке сердца тоже НЕ отнимаются при ошибках
+        const hasSubscription = state.subscription || state.unlockedAllByAdmin;
+        if (!correct && !isPractice && !hasSubscription) {
           // Отнимаем от УЖЕ ВОССТАНОВЛЕННЫХ сердец, а не от старых!
           newState.hearts = Math.max(0, recovered.hearts - 1);
           // При потере сердца перезапускаем таймер восстановления
@@ -491,17 +508,28 @@ export const useStore = create<AppState & StoreActions>()(
         return checkAndUnlockAchievements(finalState);
       }),
 
-      restoreHeart: () => set((state) => ({
-        hearts: Math.min(state.maxHearts, state.hearts + 1),
-      })),
+      restoreHeart: () => set((state) => {
+        if (state.subscription || state.unlockedAllByAdmin) {
+          return { hearts: state.maxHearts };
+        }
+        return {
+          hearts: Math.min(state.maxHearts, state.hearts + 1),
+        };
+      }),
 
-      loseHeart: () => set((state) => ({
-        hearts: Math.max(0, state.hearts - 1),
-        lastHeartRecoveryAt: Date.now(),
-      })),
+      loseHeart: () => set((state) => {
+        if (state.subscription || state.unlockedAllByAdmin) {
+          return {}; // по подписке сердца не теряются
+        }
+        return {
+          hearts: Math.max(0, state.hearts - 1),
+          lastHeartRecoveryAt: Date.now(),
+        };
+      }),
 
       awardHeartFromPractice: () => {
         const state = get();
+        if (state.subscription || state.unlockedAllByAdmin) return false;
         if (state.hearts >= state.maxHearts) return false;
         if (state.recoveryPracticeCompleted) return false;
 
@@ -578,7 +606,7 @@ export const useStore = create<AppState & StoreActions>()(
       // === НОВАЯ СИСТЕМА ПРОГРЕССИИ ===
       isEraUnlocked: (eraId: string) => {
         const s = get();
-        if (s.unlockedAllByAdmin) return true;
+        if (s.unlockedAllByAdmin || s.subscription) return true;
         return s.unlockedEras.includes(eraId);
       },
 
@@ -586,9 +614,9 @@ export const useStore = create<AppState & StoreActions>()(
         const era = eras.find(e => e.id === eraId);
         if (!era) return 'locked';
         
-        const { completedLessons, unlockedEras, unlockedAllByAdmin } = get();
+        const { completedLessons, unlockedEras, unlockedAllByAdmin, subscription } = get();
         
-        if (unlockedAllByAdmin) return 'unlocked';
+        if (unlockedAllByAdmin || subscription) return 'unlocked';
         if (!unlockedEras.includes(eraId)) return 'locked';
         
         const allLessonsCompleted = era.lessonIds.every(id => completedLessons.includes(id));
@@ -604,9 +632,9 @@ export const useStore = create<AppState & StoreActions>()(
       },
 
       canAttemptDiagnostic: (eraId: string) => {
-        const { unlockedEras, unlockedAllByAdmin, diagnosticResults } = get();
+        const { unlockedEras, unlockedAllByAdmin, subscription, diagnosticResults } = get();
         
-        if (unlockedAllByAdmin) return false;
+        if (unlockedAllByAdmin || subscription) return false;
         if (unlockedEras.includes(eraId)) return false;
         
         const diag = diagnosticResults[eraId];
@@ -619,9 +647,9 @@ export const useStore = create<AppState & StoreActions>()(
         const targetEra = eras.find(e => e.id === targetEraId);
         if (!targetEra) return false;
         
-        const { unlockedEras, diagnosticResults, attemptedDiagnostics } = get();
+        const { unlockedEras, diagnosticResults, attemptedDiagnostics, subscription } = get();
         
-        if (unlockedEras.includes(targetEraId)) return false;
+        if (unlockedEras.includes(targetEraId) || subscription) return false;
         
         const passed = score >= DIAGNOSTIC_PASS_THRESHOLD;
         const newDiagnosticResults = {
@@ -664,16 +692,51 @@ export const useStore = create<AppState & StoreActions>()(
         return get().diagnosticResults;
       },
 
+      // === ПОДПИСКА ===
+      setSubscription: (active: boolean) => {
+        const state = get();
+        if (active) {
+          const allEraIds = eras.map(e => e.id);
+          const allLessonIdsArray = eras.flatMap(e => e.lessonIds);
+          
+          useStore.setState({
+            subscription: true,
+            unlockedAllByAdmin: true,
+            unlockedEras: allEraIds,
+            unlockedLessons: [...new Set([...state.unlockedLessons, ...allLessonIdsArray])],
+          });
+        } else {
+          // Отключаем подписку — возвращаем бесплатный доступ
+          const unlockedEras = eras.slice(0, FREE_ERAS_COUNT).map(e => e.id);
+          // Оставляем уже пройденные уроки разблокированными
+          const newUnlockedLessons = [...state.completedLessons];
+          // Добавляем первые уроки доступных эпох
+          unlockedEras.forEach(eraId => {
+            const era = eras.find(e => e.id === eraId);
+            if (era && era.lessonIds.length > 0) {
+              const firstLesson = era.lessonIds[0];
+              if (!newUnlockedLessons.includes(firstLesson)) {
+                newUnlockedLessons.push(firstLesson);
+              }
+            }
+          });
+          
+          useStore.setState({
+            subscription: false,
+            unlockedAllByAdmin: false,
+            unlockedEras,
+            unlockedLessons: newUnlockedLessons,
+          });
+        }
+      },
     }),
     {
       name: STORAGE_KEY,
       storage: createJSONStorage(() => localStorage),
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, version: number) => {
-        if (version < 2) {
-          return getInitialState();
-        }
-        return persistedState as AppState & StoreActions;
+        // Сброс кеша при переходе на новую версию (система подписки)
+        return getInitialState();
       },
       onRehydrateStorage: () => (state) => {
         if (state) {
@@ -728,6 +791,8 @@ function checkAndUnlockAchievements(state: AppState): AppState {
 
 setInterval(() => {
   const state = useStore.getState();
+  // Если есть подписка — не нужно восстанавливать сердца
+  if (state.subscription || state.unlockedAllByAdmin) return;
   const recovered = applyHeartRecovery(state);
   if (recovered.hearts > state.hearts) {
     useStore.setState({ hearts: recovered.hearts, lastHeartRecoveryAt: recovered.lastHeartRecoveryAt });
@@ -744,16 +809,15 @@ export function unlockAllEras() {
   
   useStore.setState({
     unlockedAllByAdmin: true,
+    subscription: true,
     unlockedEras: allEraIds,
     unlockedLessons: [...new Set([...state.unlockedLessons, ...allLessonIdsArray])],
   });
 }
 
 export function lockAllEras() {
-  const state = useStore.getState();
-  
-  // Возвращаем к исходному состоянию — только первые FREE_ERAS_COUNT эпох
-  const unlockedEras = eras.slice(0, FREE_ERAS_COUNT).map(e => e.id);
+  // Возвращаем к исходному состоянию — только ПЕРВУЮ эпоху
+  const unlockedEras = [eras[0]?.id].filter(Boolean);
   const unlockedLessons = ['l1'];
   const firstEra = eras[0];
   if (firstEra && firstEra.lessonIds.length > 0) {
@@ -765,6 +829,7 @@ export function lockAllEras() {
   
   useStore.setState({
     unlockedAllByAdmin: false,
+    subscription: false,
     unlockedEras,
     unlockedLessons,
   });

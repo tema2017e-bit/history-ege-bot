@@ -22,13 +22,63 @@ const TheoryPage: React.FC = () => {
       .map(section => ({
         ...section,
         topics: section.topics.filter(topic => {
-          if (!topic.title.toLowerCase().includes(q) && !(topic.timeRange || '').toLowerCase().includes(q)) return false;
-          if (typeof topic.content === 'string') return true;
-          return (
-            topic.content.keyDates?.some(d => d.year.includes(q) || d.event.toLowerCase().includes(q)) ||
-            topic.content.terms?.some(t => t.term.toLowerCase().includes(q)) ||
-            topic.content.persons?.some(p => p.name.toLowerCase().includes(q))
-          );
+          // Поиск по заголовку и временному диапазону
+          if (topic.title.toLowerCase().includes(q)) return true;
+          if ((topic.timeRange || '').toLowerCase().includes(q)) return true;
+          
+          // Для строкового контента — ищем по тексту
+          if (typeof topic.content === 'string') {
+            return topic.content.toLowerCase().includes(q);
+          }
+          
+          // Для структурированного контента — ищем по всем полям
+          const c = topic.content;
+          
+          // Правители
+          if (c.rulers?.some(r => 
+            r.name.toLowerCase().includes(q) || 
+            (r.description || '').toLowerCase().includes(q) ||
+            r.years.toLowerCase().includes(q)
+          )) return true;
+          
+          // Ключевые даты
+          if (c.keyDates?.some(d => 
+            d.year.includes(q) || 
+            d.event.toLowerCase().includes(q)
+          )) return true;
+          
+          // Основные события
+          if (c.events?.some(e => e.toLowerCase().includes(q))) return true;
+          
+          // Итоги и значение
+          if (c.results?.some(r => r.toLowerCase().includes(q))) return true;
+          
+          // Термины
+          if (c.terms?.some(t => 
+            t.term.toLowerCase().includes(q) || 
+            t.definition.toLowerCase().includes(q)
+          )) return true;
+          
+          // Исторические личности
+          if (c.persons?.some(p => 
+            p.name.toLowerCase().includes(q) || 
+            p.role.toLowerCase().includes(q) ||
+            p.fact.toLowerCase().includes(q)
+          )) return true;
+          
+          // Важные факты
+          if (c.keyFacts?.some(f => f.toLowerCase().includes(q))) return true;
+          
+          // Причинно-следственные связи
+          if (c.causalLinks?.some(cl => 
+            cl.cause.toLowerCase().includes(q) || 
+            cl.effect.toLowerCase().includes(q)
+          )) return true;
+          
+          // Фокус ЕГЭ
+          if (c.examFocus?.some(f => f.toLowerCase().includes(q))) return true;
+          
+          return false;
         }),
       }))
       .filter(section => section.topics.length > 0);

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { BookOpen, Calendar, Users, ScrollText, Lightbulb, Link2, Target, ChevronDown, ChevronRight, Search, GraduationCap, Sparkles, Lock } from 'lucide-react';
 import { TopBar } from '../components/ui/TopBar';
@@ -33,6 +33,9 @@ const TheoryPage: React.FC = () => {
           
           // Для структурированного контента — ищем по всем полям
           const c = topic.content;
+          
+          // Текстовое содержимое
+          if (c.text?.toLowerCase().includes(q)) return true;
           
           // Правители
           if (c.rulers?.some(r => 
@@ -83,6 +86,17 @@ const TheoryPage: React.FC = () => {
       }))
       .filter(section => section.topics.length > 0);
   }, [searchQuery]);
+
+  // Автоматически раскрываем секции при поиске
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      setExpandedSections(prev => {
+        const next = new Set(prev);
+        filteredSections.forEach(s => next.add(s.id));
+        return next;
+      });
+    }
+  }, [searchQuery, filteredSections]);
 
   const isSectionLocked = (sectionIndex: number) => {
     if (subscription) return false;

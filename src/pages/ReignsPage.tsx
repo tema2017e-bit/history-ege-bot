@@ -12,7 +12,10 @@ import { LessonHeader, AnswerOptions, InputTask, TrueFalseTask, FeedbackBar } fr
 
 const ReignsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { completeReignTest, completedReignTests, reignMastery, xp, answerQuestion, confusedReignPairs } = useStore();
+  const { completeReignTest, completedReignTests, reignMastery, xp, answerQuestion, confusedReignPairs, subscription, tgUser } = useStore();
+
+  // Отладка
+  console.log('ReignsPage render:', { subscription, tgUser: tgUser?.id, reignClusters: reignClusters.length });
 
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
@@ -306,7 +309,6 @@ const ReignsPage: React.FC = () => {
   }
 
   // === СПИСОК КЛАСТЕРОВ ===
-  const subscription = useStore(s => s.subscription);
 
   return (
     <div className="min-h-screen bg-surface-50 dark:bg-surface-900">
@@ -347,15 +349,16 @@ const ReignsPage: React.FC = () => {
 
         {/* Кластеры */}
         <div className="space-y-3">
-          {reignClusters.map((cl, index) => {
+          {(subscription ? reignClusters : reignClusters.slice(0, FREE_ERAS_COUNT - 1)).map((cl, index) => {
             const clRulers = getRulersInCluster(cl.id);
             const isDone = completedReignTests.includes(`reign-${cl.id}`);
             const clMastery = reignMastery[cl.id] || 0;
-            const isPremium = index >= FREE_ERAS_COUNT - 1 && !subscription; // 4 эпохи бесплатно
+            // С подпиской все кластеры доступны, без подписки — только первые 4
+            const isLocked = !subscription && index >= FREE_ERAS_COUNT - 1;
 
-            if (isPremium) {
+            if (isLocked) {
               return (
-                <Link key={cl.id} to="/profile" className="block w-full bg-white dark:bg-surface-800 rounded-xl p-4 border border-gold-200 dark:border-gold-800/30 opacity-60 hover:opacity-80 transition-opacity text-left">
+                <div key={cl.id} className="block w-full bg-white dark:bg-surface-800 rounded-xl p-4 border border-gold-200 dark:border-gold-800/30 opacity-60 text-left">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0 bg-surface-200 dark:bg-surface-700">
                       <Sparkles className="w-5 h-5 text-gold-500" />
@@ -369,7 +372,7 @@ const ReignsPage: React.FC = () => {
                       <p className="text-xs text-gold-500 mt-1 font-medium">Доступно по подписке</p>
                     </div>
                   </div>
-                </Link>
+                </div>
               );
             }
 

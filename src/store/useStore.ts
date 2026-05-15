@@ -11,10 +11,10 @@ import { getNewlyUnlockedAchievements } from '../data/achievements';
 // Бсплатно доступны первые 5 эпох (Древняя Русь, Раздробленность, Монгольское иго,
 // Образование Московского государства, Царствование Ивана Грозного)
 export const FREE_ERAS_COUNT = 5;
-// Адрес бота (сервер подписок)
-const BOT_API_URL = import.meta.env.VITE_BOT_API_URL || 'https://history-ege-bot.onrender.com';
+// Адрес API для проверки подписки (прокси на Vercel)
+const BOT_API_URL = import.meta.env.VITE_BOT_API_URL || '';
 
-// Кеш статуса подписки (на 5 минут)
+// Кеш статуса подписки (на 10 секунд — для быстрого обновления)
 let lastSubscriptionCheck = 0;
 let cachedSubscriptionResult: { subscription: boolean; freeEras: number; unlockedEras: string[] } | null = null;
 
@@ -24,7 +24,7 @@ let cachedSubscriptionResult: { subscription: boolean; freeEras: number; unlocke
  */
 export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Promise<{ subscription: boolean; freeEras: number; unlockedEras: string[] }> {
   const now = Date.now();
-  if (cachedSubscriptionResult && (now - lastSubscriptionCheck) < 5 * 60 * 1000) {
+  if (cachedSubscriptionResult && (now - lastSubscriptionCheck) < 10 * 1000) {
     return cachedSubscriptionResult;
   }
 
@@ -34,9 +34,9 @@ export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Prom
       return { subscription: false, freeEras: FREE_ERAS_COUNT, unlockedEras: [] };
     }
 
-    // Используем API бота для проверки доступа
+    // Используем прокси на Vercel для проверки доступа
     const res = await fetch(
-      `${BOT_API_URL}/api/check-access?chat_id=${chatId}`,
+      `${BOT_API_URL}/api/unlock-status?userId=${chatId}`,
       { method: 'GET' }
     );
     
@@ -44,7 +44,7 @@ export async function checkSubscriptionStatus(tgUser?: AppState['tgUser']): Prom
     const data = await res.json();
     
     const result = {
-      subscription: data.unlocked === true,
+      subscription: data.unlockedAll === true,
       freeEras: FREE_ERAS_COUNT,
       unlockedEras: data.unlocked_eras || [],
     };
@@ -69,8 +69,8 @@ function getTelegramInitData(): string | null {
 }
 
 // Ключ изменён для принудительного сброса старых битых данных
-// v5: сброс кеша из-за новой системы подписки (version 3)
-const STORAGE_KEY = 'history-ege-state-v5';
+// v6: сброс кеша — исправлена логика подписки (уроки поэтапно)
+const STORAGE_KEY = 'history-ege-state-v6';
 const HEART_RECOVERY_INTERVAL = 30 * 60 * 1000; // 30 минут в мс
 
 // ==================== НОВАЯ СИСТЕМА ПРОГРЕССИИ ЭПОХ ====================
@@ -451,10 +451,10 @@ export const useStore = create<AppState & StoreActions>()(
             const nextEra = eras[currentEraIndex + 1];
             
             if (nextEra && !state.unlockedEras.includes(nextEra.id)) {
-              // Следующая эпоха разблокируется только если она входит в бесплатные
-              // ИЛИ если пользователь купил подписку
+              // Следующая эпоха разблокируется если бесплатная ИЛИ если есть подписка
               const nextEraIndex = eras.findIndex(e => e.id === nextEra.id);
-              if (nextEraIndex < FREE_ERAS_COUNT) {
+              const hasSubscription = state.subscription || state.unlockedAllByAdmin;
+              if (nextEraIndex < FREE_ERAS_COUNT || hasSubscription) {
                 newState.unlockedEras = [...state.unlockedEras, nextEra.id];
                 
                 if (nextEra.lessonIds.length > 0) {
@@ -606,7 +606,7 @@ export const useStore = create<AppState & StoreActions>()(
       // === НОВАЯ СИСТЕМА ПРОГРЕССИИ ===
       isEraUnlocked: (eraId: string) => {
         const s = get();
-        if (s.unlockedAllByAdmin || s.subscription) return true;
+        if (s.unlockedAllByAdmin) return true;
         return s.unlockedEras.includes(eraId);
       },
 
@@ -614,9 +614,9 @@ export const useStore = create<AppState & StoreActions>()(
         const era = eras.find(e => e.id === eraId);
         if (!era) return 'locked';
         
-        const { completedLessons, unlockedEras, unlockedAllByAdmin, subscription } = get();
+        const { completedLessons, unlockedEras, unlockedAllByAdmin } = get();
         
-        if (unlockedAllByAdmin || subscription) return 'unlocked';
+        if (unlockedAllByAdmin) return 'unlocked';
         if (!unlockedEras.includes(eraId)) return 'locked';
         
         const allLessonsCompleted = era.lessonIds.every(id => completedLessons.includes(id));
@@ -632,11 +632,13 @@ export const useStore = create<AppState & StoreActions>()(
       },
 
       canAttemptDiagnostic: (eraId: string) => {
-        const { unlockedEras, unlockedAllByAdmin, subscription, diagnosticResults } = get();
+        const { unlockedEras, unlockedAllByAdmin, diagnosticResults } = get();
         
-        if (unlockedAllByAdmin || subscription) return false;
+        // Админ уже всё разблокировал — диагностика не нужна
+        if (unlockedAllByAdmin) return false;
+        // Эпоха уже разблокирована — диагностика не нужна
         if (unlockedEras.includes(eraId)) return false;
-        
+        // Диагностика уже пройдена успешно — повторно нельзя
         const diag = diagnosticResults[eraId];
         if (diag && diag.score >= DIAGNOSTIC_PASS_THRESHOLD) return false;
         
@@ -647,9 +649,10 @@ export const useStore = create<AppState & StoreActions>()(
         const targetEra = eras.find(e => e.id === targetEraId);
         if (!targetEra) return false;
         
-        const { unlockedEras, diagnosticResults, attemptedDiagnostics, subscription } = get();
+        const { unlockedEras, diagnosticResults, attemptedDiagnostics } = get();
         
-        if (unlockedEras.includes(targetEraId) || subscription) return false;
+        // Эпоха уже разблокирована — не отправляем
+        if (unlockedEras.includes(targetEraId)) return false;
         
         const passed = score >= DIAGNOSTIC_PASS_THRESHOLD;
         const newDiagnosticResults = {
@@ -696,22 +699,22 @@ export const useStore = create<AppState & StoreActions>()(
       setSubscription: (active: boolean) => {
         const state = get();
         if (active) {
+          // Подписка активирована — разблокируем все эпохи и первый урок каждой эпохи
           const allEraIds = eras.map(e => e.id);
-          const allLessonIdsArray = eras.flatMap(e => e.lessonIds);
+          // Разблокируем только первый урок каждой эпохи (остальные — по мере прохождения)
+          const firstLessons = eras.filter(e => e.lessonIds.length > 0).map(e => e.lessonIds[0]);
           
           useStore.setState({
             subscription: true,
             unlockedAllByAdmin: true,
             unlockedEras: allEraIds,
-            unlockedLessons: [...new Set([...state.unlockedLessons, ...allLessonIdsArray])],
+            unlockedLessons: [...new Set([...state.unlockedLessons, ...firstLessons])],
           });
         } else {
-          // Отключаем подписку — возвращаем бесплатный доступ
-          const unlockedEras = eras.slice(0, FREE_ERAS_COUNT).map(e => e.id);
-          // Оставляем уже пройденные уроки разблокированными
+          // Отключаем подписку — оставляем только бесплатные эпохи
+          const freeEraIds = eras.slice(0, FREE_ERAS_COUNT).map(e => e.id);
           const newUnlockedLessons = [...state.completedLessons];
-          // Добавляем первые уроки доступных эпох
-          unlockedEras.forEach(eraId => {
+          freeEraIds.forEach(eraId => {
             const era = eras.find(e => e.id === eraId);
             if (era && era.lessonIds.length > 0) {
               const firstLesson = era.lessonIds[0];
@@ -724,7 +727,7 @@ export const useStore = create<AppState & StoreActions>()(
           useStore.setState({
             subscription: false,
             unlockedAllByAdmin: false,
-            unlockedEras,
+            unlockedEras: freeEraIds,
             unlockedLessons: newUnlockedLessons,
           });
         }
@@ -805,13 +808,14 @@ export function unlockAllEras() {
   const state = useStore.getState();
   
   const allEraIds = eras.map(e => e.id);
-  const allLessonIdsArray = eras.flatMap(e => e.lessonIds);
+  // Разблокируем только первый урок каждей эпохи (остальные — по мере прохождения)
+  const firstLessons = eras.filter(e => e.lessonIds.length > 0).map(e => e.lessonIds[0]);
   
   useStore.setState({
     unlockedAllByAdmin: true,
     subscription: true,
     unlockedEras: allEraIds,
-    unlockedLessons: [...new Set([...state.unlockedLessons, ...allLessonIdsArray])],
+    unlockedLessons: [...new Set([...state.unlockedLessons, ...firstLessons])],
   });
 }
 

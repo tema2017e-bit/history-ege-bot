@@ -16,6 +16,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - app_network
 
   # Telegram бот + API
   bot:
@@ -30,20 +32,18 @@ services:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://history_ege:${DB_PASSWORD:-changeme}@db:5432/history_ege
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      BOT_USERNAME: ${BOT_USERNAME:-history_ege_bot}
-      MINI_APP_URL: ${MINI_APP_URL:-https://history-ege.vercel.app}
-      ADMIN_ID: ${ADMIN_ID:-0}
-      ADMIN_API_SECRET: ${ADMIN_API_SECRET:-admin-secret-2024}
-      API_PORT: 3000
-      YUKASSA_SHOP_ID: ${YUKASSA_SHOP_ID}
-      YUKASSA_SECRET_KEY: ${YUKASSA_SECRET_KEY}
-      EXTERNAL_URL: ${EXTERNAL_URL}
-      # SOCKS5 прокси на хосте для доступа к Telegram API
       SOCKS_PROXY: socks5://172.19.0.1:1080
+    networks:
+      - app_network
 
 volumes:
   postgres_data:
+
+networks:
+  app_network:
+    driver: bridge

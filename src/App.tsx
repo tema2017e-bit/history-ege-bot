@@ -23,6 +23,7 @@ import { useTelegram } from './utils/telegram';
 const SubscriptionHandler: React.FC = () => {
   const tgUser = useStore(state => state.tgUser);
   const setSubscription = useStore(state => state.setSubscription);
+  const subscription = useStore(state => state.subscription);
 
   useEffect(() => {
     if (!tgUser?.id) return;
@@ -34,9 +35,13 @@ const SubscriptionHandler: React.FC = () => {
         const result = await checkSubscriptionStatus(tgUser);
         if (cancelled) return;
 
-        if (result.subscription) {
-          // Пользователь оплатил — разблокируем всё (через серверную проверку)
+        // Если сервер говорит что есть подписка — разблокируем
+        if (result.subscription && !subscription) {
           setSubscription(true);
+        }
+        // Если сервер говорит что нет подписки а у нас есть — блокируем
+        if (!result.subscription && subscription) {
+          setSubscription(false);
         }
       } catch (e) {
         console.error('Subscription check failed:', e);
@@ -45,8 +50,14 @@ const SubscriptionHandler: React.FC = () => {
 
     checkStatus();
 
-    return () => { cancelled = true; };
-  }, [tgUser?.id, setSubscription]);
+    // Проверяем каждые 30 секунд
+    const interval = setInterval(checkStatus, 30000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [tgUser?.id, setSubscription, subscription]);
 
   return null;
 };
@@ -76,6 +87,18 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   
   if (!onboardingComplete) {
     return <Navigate to="/onboarding" replace />;
+  }
+  
+  return <>{children}</>;
+};
+
+// Компонент-защита для разделов, требующих подписку
+const SubscriptionGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const subscription = useStore(state => state.subscription);
+  const unlockedAllByAdmin = useStore(state => state.unlockedAllByAdmin);
+  
+  if (!subscription && !unlockedAllByAdmin) {
+    return <Navigate to="/profile" replace />;
   }
   
   return <>{children}</>;
@@ -240,7 +263,7 @@ const App: React.FC = () => {
           path="/date-memory"
           element={
             <ProtectedRoute>
-              <DateMemoryPage />
+              <SubscriptionGate><DateMemoryPage /></SubscriptionGate>
             </ProtectedRoute>
           }
         />
@@ -248,7 +271,7 @@ const App: React.FC = () => {
           path="/endless"
           element={
             <ProtectedRoute>
-              <EndlessPage />
+              <SubscriptionGate><EndlessPage /></SubscriptionGate>
             </ProtectedRoute>
           }
         />

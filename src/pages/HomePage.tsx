@@ -19,7 +19,11 @@ const HomePage: React.FC = () => {
     getEraStatus,
     canAttemptDiagnostic,
     cardProgress,
+    subscription,
+    unlockedAllByAdmin,
   } = useStore();
+
+  const hasSubscription = subscription || unlockedAllByAdmin;
 
   // Определяем текущий урок (первый незавершённый из разблокированных)
   const currentLesson = unlockedLessons.find(id => !completedLessons.includes(id)) || null;
@@ -154,17 +158,39 @@ const HomePage: React.FC = () => {
             <span className="text-xs text-surface-400 dark:text-surface-500 mt-1">Разбор ошибок</span>
           </Link>
 
+          {hasSubscription ? (
             <Link to="/endless" className="card card-hover p-4 flex flex-col items-center text-center border-gold-200 bg-gold-50/30 dark:border-gold-800/30 dark:bg-gold-900/10">
-            <Zap className="w-8 h-8 text-gold-500 mb-2" />
-            <span className="font-medium text-sm text-surface-700 dark:text-surface-200">Бесконечный поток</span>
-            <span className="text-xs text-gold-600 dark:text-gold-400 mt-1">Отвечай, пока не ошибёшься</span>
-          </Link>
+              <Zap className="w-8 h-8 text-gold-500 mb-2" />
+              <span className="font-medium text-sm text-surface-700 dark:text-surface-200">Бесконечный поток</span>
+              <span className="text-xs text-gold-600 dark:text-gold-400 mt-1">Отвечай, пока не ошибёшься</span>
+            </Link>
+          ) : (
+            <div className="card p-4 flex flex-col items-center text-center opacity-50 dark:bg-surface-800">
+              <div className="relative">
+                <Zap className="w-8 h-8 text-gold-500 mb-2" />
+                <Lock className="w-4 h-4 text-surface-400 absolute -bottom-1 -right-1" />
+              </div>
+              <span className="font-medium text-sm text-surface-500 dark:text-surface-400">Бесконечный поток</span>
+              <span className="text-xs text-surface-400 mt-1">Только с подпиской</span>
+            </div>
+          )}
 
-          <Link to="/date-memory" className="card card-hover p-4 flex flex-col items-center text-center border-indigo-200 bg-indigo-50/30 dark:border-indigo-800/30 dark:bg-indigo-900/10">
-            <Brain className="w-8 h-8 text-indigo-500 mb-2" />
-            <span className="font-medium text-sm text-surface-700 dark:text-surface-200">Чистый зачёт</span>
-            <span className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">Все режимы</span>
-          </Link>
+          {hasSubscription ? (
+            <Link to="/date-memory" className="card card-hover p-4 flex flex-col items-center text-center border-indigo-200 bg-indigo-50/30 dark:border-indigo-800/30 dark:bg-indigo-900/10">
+              <Brain className="w-8 h-8 text-indigo-500 mb-2" />
+              <span className="font-medium text-sm text-surface-700 dark:text-surface-200">Чистый зачёт</span>
+              <span className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">Все режимы</span>
+            </Link>
+          ) : (
+            <div className="card p-4 flex flex-col items-center text-center opacity-50 dark:bg-surface-800">
+              <div className="relative">
+                <Brain className="w-8 h-8 text-indigo-500 mb-2" />
+                <Lock className="w-4 h-4 text-surface-400 absolute -bottom-1 -right-1" />
+              </div>
+              <span className="font-medium text-sm text-surface-500 dark:text-surface-400">Чистый зачёт</span>
+              <span className="text-xs text-surface-400 mt-1">Только с подпиской</span>
+            </div>
+          )}
         </motion.div>
 
         {/* Правления + Сердца */}
@@ -195,7 +221,7 @@ const HomePage: React.FC = () => {
         >
           <h2 className="text-lg font-bold text-surface-800 dark:text-surface-100 mb-3">Эпохи</h2>
           <div className="space-y-3">
-            {eras.map((era) => {
+            {(hasSubscription ? eras : eras.slice(0, FREE_ERAS_COUNT)).map((era) => {
               const eraLessons = era.lessonIds;
               const completedCount = eraLessons.filter(id => completedLessons.includes(id)).length;
               const status = getEraStatus(era.id);
@@ -267,14 +293,11 @@ const EraCard: React.FC<{
   const subscription = useStore(s => s.subscription);
 
   if (status === 'locked') {
-    // Если эпоха за пределами бесплатного доступа — показываем подписку
-    const isPremium = eras.findIndex(e => e.id === era.id) >= FREE_ERAS_COUNT && !subscription;
-    
     return (
       <div className="card opacity-60 dark:bg-surface-800">
         <div className="flex items-start gap-3">
           <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 bg-surface-200 dark:bg-surface-700">
-            {isPremium ? <Sparkles className="w-7 h-7 text-gold-500" /> : <Lock className="w-7 h-7 text-surface-400" />}
+            <Lock className="w-7 h-7 text-surface-400" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
@@ -282,14 +305,7 @@ const EraCard: React.FC<{
               <span className="text-xs text-surface-400">{era.yearRange}</span>
             </div>
             <p className="text-xs text-surface-400 mt-0.5">{era.description}</p>
-            {isPremium ? (
-              <Link to="/profile" className="mt-2 inline-block">
-                <div className="bg-gold-500 text-white text-xs py-1.5 px-3 flex items-center gap-1 rounded-lg font-medium">
-                  <Sparkles className="w-3 h-3" />
-                  Оформить подписку
-                </div>
-              </Link>
-            ) : canDiagnostic ? (
+            {canDiagnostic ? (
               <Link to={`/diagnostic/${era.id}`} className="mt-2 inline-block">
                 <div className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1 mt-2">
                   <TestTube className="w-3 h-3" />

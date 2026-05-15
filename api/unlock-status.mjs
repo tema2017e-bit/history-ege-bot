@@ -4,8 +4,8 @@
 
 const ADMIN_SECRET = process.env.ADMIN_API_SECRET || 'admin-secret-2024';
 
-// URL API бота (VDS/Render)
-const BOT_API_URL = process.env.BOT_API_URL || 'https://history-ege-bot.onrender.com';
+// URL API бота (VDS)
+const BOT_API_URL = process.env.BOT_API_URL || 'http://111.88.118.192:3000';
 
 export default async function handler(req, res) {
   // CORS

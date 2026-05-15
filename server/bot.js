@@ -340,38 +340,50 @@ async function handleCheckPayment(chatId, paymentId) {
 
 // ======================== АДМИН-ПАНЕЛЬ ========================
 
+// Главное меню админ-панели (без Markdown-разметки для надёжности)
+function adminHelpText() {
+  return `🛠 Админ-панель\n\n` +
+    `📊 Статистика:\n` +
+    `/admin stats — общая статистика\n\n` +
+    `👥 Пользователи:\n` +
+    `/admin users — список пользователей\n` +
+    `/admin user <chatId> — информация о пользователе\n\n` +
+    `💎 Подписка:\n` +
+    `/admin unlock <chatId> — выдать подписку\n` +
+    `/admin lock <chatId> — отозвать подписку\n\n` +
+    `📜 Эпохи пользователя:\n` +
+    `/admin eras <chatId> — список открытых эпох\n\n` +
+    `📨 Рассылка:\n` +
+    `/admin broadcast <текст> — отправить всем\n\n` +
+    `💰 Платежи:\n` +
+    `/admin check <paymentId> — проверить платёж\n` +
+    `/admin testpay <chatId> — тестовая оплата\n\n` +
+    `📜 Доступные eraId:\n` +
+    AVAILABLE_ERAS.map(e => `• ${e} — ${ERA_NAMES[e]}`).join('\n');
+}
+
+// Обработчик команды /admin
 async function handleAdmin(msg) {
   const chatId = msg.chat.id;
+  
+  // Проверка прав администратора
   if (chatId !== config.ADMIN_ID) {
     return sendMessage(chatId, '⛔ Доступ запрещён.');
   }
 
   const text = msg.text || '';
-  const args = text.split(' ').slice(1);
-  const command = args[0];
+  const parts = text.split(' ').filter(Boolean);
+  // parts[0] = '/admin', parts[1] = подкоманда, parts[2+] = аргументы
+  
+  const subcommand = parts[1]?.toLowerCase();
 
-  const helpText = 
-    `*🛠 Админ-панель*\n\n` +
-    `*/admin* — это меню\n` +
-    `*/admin stats* — статистика\n` +
-    `*/admin users* — список пользователей\n` +
-    `*/admin unlock <chatId>* — разблокировать все эпохи\n` +
-    `*/admin lock <chatId>* — забрать разблокировку\n` +
-    `*/admin unlock_era <chatId> <eraId>* — открыть эпоху\n` +
-    `*/admin lock_era <chatId> <eraId>* — закрыть эпоху\n` +
-    `*/admin eras <chatId>* — список открытых эпох\n` +
-    `*/admin broadcast <текст>* — рассылка\n` +
-    `*/admin check <paymentId>* — проверить платёж\n` +
-    `*/admin testpay <chatId>* — тестовая оплата\n\n` +
-    `*Доступные eraId:*\n` +
-    AVAILABLE_ERAS.map(e => `• \`${e}\` — ${ERA_NAMES[e]}`).join('\n');
-
-  if (!command) {
-    return sendMessage(chatId, helpText);
+  // ===== БЕЗ АРГУМЕНТОВ — ПОКАЗЫВАЕМ МЕНЮ =====
+  if (!subcommand) {
+    return sendMessage(chatId, adminHelpText());
   }
 
   // ===== СТАТИСТИКА =====
-  if (command === 'stats') {
+  if (subcommand === 'stats') {
     const stats = await db.getStats();
     return sendMessage(chatId,
       `*📊 Статистика*\n\n` +
@@ -382,7 +394,7 @@ async function handleAdmin(msg) {
   }
 
   // ===== СПИСОК ПОЛЬЗОВАТЕЛЕЙ =====
-  if (command === 'users') {
+  if (subcommand === 'users') {
     const users = await db.getAllUsers();
     if (users.length === 0) {
       return sendMessage(chatId, '❌ Нет зарегистрированных пользователей.');
@@ -400,82 +412,76 @@ async function handleAdmin(msg) {
     return sendMessage(chatId, `*👥 Пользователи (${users.length}):*\n\n${list}`);
   }
 
-  // ===== РАЗБЛОКИРОВАТЬ ВСЕ =====
-  if (command === 'unlock') {
-    const targetId = parseInt(args[1]);
+  // ===== ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ =====
+  if (subcommand === 'user') {
+    const targetId = parseInt(parts[2]);
     if (!targetId) {
-      return sendMessage(chatId, '❌ Укажи chatId: \`/admin unlock 123456789\`');
+      return sendMessage(chatId, '❌ Укажи chatId: `/admin user 123456789`');
+    }
+
+    const user = await db.getUser(targetId);
+    if (!user) {
+      return sendMessage(chatId, `❌ Пользователь \`${targetId}\` не найден.`);
+    }
+
+    const unlockedEras = await db.getUnlockedEras(targetId);
+    const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || '—';
+    const username = user.username ? `@${user.username}` : '—';
+    const firstSeen = user.first_seen ? new Date(user.first_seen).toLocaleDateString('ru-RU') : '—';
+    const lastActivity = user.last_activity ? new Date(user.last_activity).toLocaleDateString('ru-RU') : '—';
+
+    let text = `*👤 Пользователь*\n\n`;
+    text += `📝 Имя: ${name}\n`;
+    text += `📱 Username: ${username}\n`;
+    text += `🆔 Chat ID: \`${user.chat_id}\`\n`;
+    text += `📅 Первый визит: ${firstSeen}\n`;
+    text += `⚡ Последняя активность: ${lastActivity}\n`;
+    text += `🔓 Полный доступ: ${user.unlocked_all ? '✅ Да' : '❌ Нет'}\n`;
+    
+    if (unlockedEras.length > 0) {
+      text += `\n📜 Открытые эпохи:\n`;
+      for (const era of unlockedEras) {
+        text += `• ${ERA_NAMES[era] || era}\n`;
+      }
+    }
+
+    return sendMessage(chatId, text);
+  }
+
+  // ===== ВЫДАТЬ ПОДПИСКУ =====
+  if (subcommand === 'unlock') {
+    const targetId = parseInt(parts[2]);
+    if (!targetId) {
+      return sendMessage(chatId, '❌ Укажи chatId: `/admin unlock 123456789`');
     }
 
     await db.createUser(targetId, '', '', '');
     await db.setUnlocked(targetId, true);
-    await sendMessage(chatId, `✅ Все эпохи разблокированы для \`${targetId}\``);
+    await sendMessage(chatId, `✅ Подписка выдана для \`${targetId}\``);
 
     try {
-      await sendMessage(targetId, `🎉 *Все эпохи разблокированы!*\n\nНажми кнопку ниже, чтобы начать:`, { reply_markup: mainKeyboard() });
+      await sendMessage(targetId, `🎉 *Подписка активирована!*\n\nВсе эпохи и разделы разблокированы.\nНажми кнопку ниже, чтобы начать:`, { reply_markup: mainKeyboard() });
     } catch {
       await sendMessage(chatId, `⚠️ Не удалось уведомить пользователя \`${targetId}\``);
     }
     return;
   }
 
-  // ===== ЗАБРАТЬ РАЗБЛОКИРОВКУ =====
-  if (command === 'lock') {
-    const targetId = parseInt(args[1]);
+  // ===== ОТОЗВАТЬ ПОДПИСКУ =====
+  if (subcommand === 'lock') {
+    const targetId = parseInt(parts[2]);
     if (!targetId) {
-      return sendMessage(chatId, '❌ Укажи chatId: \`/admin lock 123456789\`');
+      return sendMessage(chatId, '❌ Укажи chatId: `/admin lock 123456789`');
     }
     await db.setUnlocked(targetId, false);
-    return sendMessage(chatId, `✅ Разблокировка отозвана для \`${targetId}\``);
-  }
-
-  // ===== ОТКРЫТЬ ОТДЕЛЬНУЮ ЭПОХУ =====
-  if (command === 'unlock_era') {
-    const targetId = parseInt(args[1]);
-    const eraId = args[2]?.toLowerCase();
-    
-    if (!targetId || !eraId) {
-      return sendMessage(chatId, '❌ Укажи chatId и eraId: \`/admin unlock_era 123456789 ancient\`');
-    }
-    
-    if (!AVAILABLE_ERAS.includes(eraId)) {
-      return sendMessage(chatId, `❌ Неизвестная эпоха \`${eraId}\`.\nДоступные: ${AVAILABLE_ERAS.map(e => `\`${e}\``).join(', ')}`);
-    }
-
-    await db.createUser(targetId, '', '', '');
-    await db.unlockEra(targetId, eraId);
-    
-    const eraName = ERA_NAMES[eraId] || eraId;
-    await sendMessage(chatId, `✅ Эпоха *${eraName}* открыта для \`${targetId}\``);
-
-    try {
-      await sendMessage(targetId, `🎉 *Эпоха "${eraName}" открыта!*\n\nНажми кнопку ниже, чтобы начать:`, { reply_markup: mainKeyboard() });
-    } catch {
-      await sendMessage(chatId, `⚠️ Не удалось уведомить пользователя \`${targetId}\``);
-    }
-    return;
-  }
-
-  // ===== ЗАКРЫТЬ ОТДЕЛЬНУЮ ЭПОХУ =====
-  if (command === 'lock_era') {
-    const targetId = parseInt(args[1]);
-    const eraId = args[2]?.toLowerCase();
-    
-    if (!targetId || !eraId) {
-      return sendMessage(chatId, '❌ Укажи chatId и eraId: \`/admin lock_era 123456789 ancient\`');
-    }
-
-    await db.lockEra(targetId, eraId);
-    
-    const eraName = ERA_NAMES[eraId] || eraId;
-    return sendMessage(chatId, `✅ Эпоха *${eraName}* закрыта для \`${targetId}\``);
+    return sendMessage(chatId, `✅ Подписка отозвана для \`${targetId}\``);
   }
 
   // ===== СПИСОК ОТКРЫТЫХ ЭПОХ ПОЛЬЗОВАТЕЛЯ =====
-  if (command === 'eras') {
-    const targetId = parseInt(args[1]);
+  if (subcommand === 'eras') {
+    const targetId = parseInt(parts[2]);
     if (!targetId) {
-      return sendMessage(chatId, '❌ Укажи chatId: \`/admin eras 123456789\`');
+      return sendMessage(chatId, '❌ Укажи chatId: `/admin eras 123456789`');
     }
 
     const user = await db.getUser(targetId);
@@ -507,10 +513,10 @@ async function handleAdmin(msg) {
   }
 
   // ===== РАССЫЛКА =====
-  if (command === 'broadcast') {
-    const broadcastText = args.slice(1).join(' ');
+  if (subcommand === 'broadcast') {
+    const broadcastText = parts.slice(2).join(' ');
     if (!broadcastText) {
-      return sendMessage(chatId, '❌ Укажи текст: \`/admin broadcast Привет всем!\`');
+      return sendMessage(chatId, '❌ Укажи текст: `/admin broadcast Привет всем!`');
     }
 
     const users = await db.getAllUsers();
@@ -539,10 +545,10 @@ async function handleAdmin(msg) {
   }
 
   // ===== ПРОВЕРИТЬ ПЛАТЁЖ =====
-  if (command === 'check') {
-    const paymentId = args[1];
+  if (subcommand === 'check') {
+    const paymentId = parts[2];
     if (!paymentId) {
-      return sendMessage(chatId, '❌ Укажи paymentId');
+      return sendMessage(chatId, '❌ Укажи paymentId: `/admin check payment_id`');
     }
 
     const payment = await db.getPayment(paymentId);
@@ -562,10 +568,10 @@ async function handleAdmin(msg) {
   }
 
   // ===== ТЕСТОВАЯ ОПЛАТА =====
-  if (command === 'testpay') {
-    const targetId = parseInt(args[1]);
+  if (subcommand === 'testpay') {
+    const targetId = parseInt(parts[2]);
     if (!targetId) {
-      return sendMessage(chatId, '❌ Укажи chatId: \`/admin testpay 123456789\`');
+      return sendMessage(chatId, '❌ Укажи chatId: `/admin testpay 123456789`');
     }
 
     await db.createUser(targetId, '', '', '');
@@ -582,7 +588,8 @@ async function handleAdmin(msg) {
     return;
   }
 
-  return sendMessage(chatId, helpText);
+  // ===== НЕИЗВЕСТНАЯ КОМАНДА =====
+  return sendMessage(chatId, adminHelpText());
 }
 
 // ======================== ОБРАБОТКА СООБЩЕНИЙ ========================

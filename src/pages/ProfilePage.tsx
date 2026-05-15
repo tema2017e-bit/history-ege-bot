@@ -4,40 +4,24 @@ import { useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Star, Trophy, Flame, Target, Zap, Heart,
   Award, BookOpen, BarChart3, Brain, Shield, Crown, Swords,
-  Scroll, Gem, Sparkles, Repeat, Clock, Unlock, Lock
+  Scroll, Gem, Sparkles, Repeat, Clock, Unlock, Lock, TrendingUp,
+  ChevronRight
 } from 'lucide-react';
 import { TopBar } from '../components/ui/TopBar';
 import { useStore } from '../store/useStore';
 import { eras, historyCards } from '../data/historyDates';
 import { ALL_ACHIEVEMENTS, AchievementInfo } from '../data/achievements';
 
-// ======================== СТАТИСТИКА КАРТОЧЕК ========================
-
 const MasteryIcon: Record<string, string> = {
-  new: '🆕',
-  learning: '📖',
-  weak: '⚠️',
-  good: '👍',
-  mastered: '⭐',
+  new: '🆕', learning: '📖', weak: '⚠️', good: '👍', mastered: '⭐',
 };
-
 const MasteryLabel: Record<string, string> = {
-  new: 'Новые',
-  learning: 'В процессе',
-  weak: 'Слабые',
-  good: 'Хорошие',
-  mastered: 'Освоенные',
+  new: 'Новые', learning: 'В процессе', weak: 'Слабые', good: 'Хорошие', mastered: 'Освоенные',
 };
-
 const MasteryColor: Record<string, string> = {
-  new: 'bg-surface-100 text-surface-500',
-  learning: 'bg-blue-100 text-blue-600',
-  weak: 'bg-red-100 text-red-600',
-  good: 'bg-emerald-100 text-emerald-600',
-  mastered: 'bg-gold-100 text-gold-600',
+  new: 'bg-surface-100 text-surface-500', learning: 'bg-blue-100 text-blue-600',
+  weak: 'bg-red-100 text-red-600', good: 'bg-emerald-100 text-emerald-600', mastered: 'bg-gold-100 text-gold-600',
 };
-
-// ======================== КАТЕГОРИИ ДОСТИЖЕНИЙ ========================
 
 const CategoryConfig: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
   lessons: { label: 'Уроки', icon: <BookOpen className="w-4 h-4" />, color: 'text-blue-500' },
@@ -63,35 +47,25 @@ const ProfilePage: React.FC = () => {
     subscription,
   } = store;
 
-  // Ссылка на бота для подписки
   const getBotSubscribeLink = () => {
     let chatId = '';
     try {
       const tg = (window as any).Telegram?.WebApp;
-      if (tg?.initDataUnsafe?.user?.id) {
-        chatId = tg.initDataUnsafe.user.id;
-      }
+      if (tg?.initDataUnsafe?.user?.id) chatId = tg.initDataUnsafe.user.id;
     } catch {}
     return `https://t.me/HistDate_bot?start=subscribe_${chatId}`;
   };
 
-  // ======================== СТАТИСТИКА ========================
-
   const stats = useMemo(() => {
     const totalAttempts = totalCorrectAnswers + mistakes.length;
-
-    // Прогресс по эпохам
     const eraProgress = eras.map(era => {
       const eraLessons = era.lessonIds;
       const completed = eraLessons.filter(id => completedLessons.includes(id)).length;
       return {
-        era,
-        completed,
-        total: eraLessons.length,
+        era, completed, total: eraLessons.length,
         percent: eraLessons.length > 0 ? Math.round((completed / eraLessons.length) * 100) : 0,
       };
     });
-
     return {
       eraProgress,
       accuracy: totalAttempts > 0 ? Math.round((totalCorrectAnswers / totalAttempts) * 100) : 0,
@@ -106,14 +80,9 @@ const ProfilePage: React.FC = () => {
     };
   }, [cardProgress, completedLessons, totalCorrectAnswers, mistakes.length]);
 
-  // ======================== АЧИВКИ ========================
-
   const achievementData = useMemo(() => {
     const unlocked = new Set(achievements);
-    return ALL_ACHIEVEMENTS.map(a => ({
-      ...a,
-      unlocked: unlocked.has(a.id),
-    }));
+    return ALL_ACHIEVEMENTS.map(a => ({ ...a, unlocked: unlocked.has(a.id) }));
   }, [achievements]);
 
   const groupedAchievements = useMemo(() => {
@@ -131,7 +100,6 @@ const ProfilePage: React.FC = () => {
   return (
     <div className="min-h-screen bg-surface-50 dark:bg-surface-900">
       <TopBar />
-
       <div className="max-w-lg mx-auto px-4 pb-40">
         <button
           onClick={() => navigate('/')}
@@ -141,12 +109,8 @@ const ProfilePage: React.FC = () => {
           <span>Назад</span>
         </button>
 
-        {/* ===== ПРОФИЛЬ ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-6"
-        >
+        {/* ПРОФИЛЬ */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-6">
           <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center mx-auto mb-4 shadow-xl shadow-primary-500/30">
             <span className="text-4xl font-bold text-white">{level}</span>
           </div>
@@ -154,13 +118,8 @@ const ProfilePage: React.FC = () => {
           <p className="text-surface-500 dark:text-surface-400 mt-1">Уровень {level} • {xp} XP</p>
         </motion.div>
 
-        {/* ===== ПОДПИСКА ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="mb-6"
-        >
+        {/* ПОДПИСКА */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="mb-4">
           <div className="card overflow-hidden">
             {subscription ? (
               <div className="flex items-start gap-3">
@@ -169,9 +128,7 @@ const ProfilePage: React.FC = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="font-semibold text-surface-800 dark:text-surface-100">Подписка активна ✨</h3>
-                  <p className="text-sm text-surface-500 dark:text-surface-400 mt-1">
-                    Вам доступны все эпохи и бесконечные сердца
-                  </p>
+                  <p className="text-sm text-surface-500 dark:text-surface-400 mt-1">Вам доступны все эпохи и бесконечные сердца</p>
                   <div className="flex items-center gap-2 mt-3 text-xs text-surface-400 dark:text-surface-500">
                     <Unlock className="w-3 h-3 text-emerald-500" />
                     <span>Все эпохи разблокированы</span>
@@ -189,9 +146,7 @@ const ProfilePage: React.FC = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="font-semibold text-surface-800 dark:text-surface-100">Оформить подписку</h3>
-                  <p className="text-sm text-surface-500 dark:text-surface-400 mt-1">
-                    Получите доступ ко всем эпохам, бесконечные сердца и больше возможностей
-                  </p>
+                  <p className="text-sm text-surface-500 dark:text-surface-400 mt-1">Получите доступ ко всем эпохам, бесконечные сердца и больше возможностей</p>
                   <ul className="mt-3 space-y-1">
                     <li className="flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400">
                       <Sparkles className="w-3 h-3 text-gold-500" />
@@ -206,31 +161,34 @@ const ProfilePage: React.FC = () => {
                       <span>Все блоки правлений</span>
                     </li>
                   </ul>
-                  <a
-                    href={getBotSubscribeLink()}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-4 inline-flex items-center gap-2 bg-gradient-to-r from-gold-500 to-amber-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:from-gold-600 hover:to-amber-700 transition-all shadow-lg shadow-gold-500/25"
-                  >
+                  <a href={getBotSubscribeLink()} target="_blank" rel="noopener noreferrer"
+                    className="mt-4 inline-flex items-center gap-2 bg-gradient-to-r from-gold-500 to-amber-600 text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:from-gold-600 hover:to-amber-700 transition-all shadow-lg shadow-gold-500/25">
                     <Sparkles className="w-4 h-4" />
                     Оформить подписку
                   </a>
-                  <p className="text-xs text-surface-400 dark:text-surface-500 mt-2">
-                    После оплаты напишите администратору для активации
-                  </p>
+                  <p className="text-xs text-surface-400 dark:text-surface-500 mt-2">После оплаты напишите администратору для активации</p>
                 </div>
               </div>
             )}
           </div>
         </motion.div>
 
-        {/* ===== СТАТИСТИКА В 3 КОЛОНКИ ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="grid grid-cols-3 gap-2 sm:gap-3 mb-4"
-        >
+        {/* ДЕТАЛЬНАЯ СТАТИСТИКА */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }} className="mb-4">
+          <Link to="/stats" className="card p-4 flex items-center gap-3 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center flex-shrink-0">
+              <TrendingUp className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="font-semibold text-surface-800 dark:text-surface-100 text-sm">Детальная статистика</h3>
+              <p className="text-xs text-surface-500 dark:text-surface-400 mt-0.5">Анализ по эпохам, слабые места, прогресс</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-surface-400 flex-shrink-0" />
+          </Link>
+        </motion.div>
+
+        {/* СТАТИСТИКА В 3 КОЛОНКИ */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-3 gap-2 sm:gap-3 mb-4">
           <div className="card !p-3 sm:!p-4 text-center">
             <Target className={`w-5 h-5 mx-auto mb-1.5 ${stats.accuracyColor}`} />
             <div className={`text-lg sm:text-xl font-bold leading-tight ${stats.accuracyColor}`}>{stats.accuracy}%</div>
@@ -248,13 +206,8 @@ const ProfilePage: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* ===== ДОП. СТАТИСТИКА ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="grid grid-cols-3 gap-2 sm:gap-3 mb-6"
-        >
+        {/* ДОП. СТАТИСТИКА */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
           <div className="card !p-2 sm:!p-3 text-center">
             <Trophy className="w-4 h-4 text-amber-500 mx-auto mb-0.5" />
             <div className="text-base sm:text-lg font-bold text-surface-700 dark:text-surface-200">{perfectLessons}</div>
@@ -272,13 +225,8 @@ const ProfilePage: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* ===== ДОСТИЖЕНИЯ ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="mb-6"
-        >
+        {/* ДОСТИЖЕНИЯ */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-bold text-surface-800 dark:text-surface-100 flex items-center gap-2">
               <Gem className="w-5 h-5 text-primary-500" />
@@ -288,7 +236,6 @@ const ProfilePage: React.FC = () => {
               {unlockedCount}/{totalAchievements}
             </span>
           </div>
-
           <div className="space-y-4">
             {(Object.entries(groupedAchievements) as [string, (AchievementInfo & { unlocked: boolean })[]][]).map(([category, achs]) => {
               const cat = CategoryConfig[category] || { label: category, icon: null, color: 'text-surface-500' };
@@ -297,37 +244,16 @@ const ProfilePage: React.FC = () => {
                 <div key={category}>
                   <div className="flex items-center gap-1.5 mb-2">
                     <span className={cat.color}>{cat.icon}</span>
-                    <span className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">
-                      {cat.label}
-                    </span>
+                    <span className="text-xs font-medium text-surface-500 dark:text-surface-400 uppercase tracking-wider">{cat.label}</span>
                     <span className="text-[10px] text-surface-400 dark:text-surface-500 ml-auto">{catUnlocked}/{achs.length}</span>
                   </div>
                   <div className="grid grid-cols-5 gap-2">
                     {achs.map((ach, index) => (
-                      <motion.div
-                        key={ach.id}
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: index * 0.02 }}
-                        className={`relative aspect-square rounded-xl flex flex-col items-center justify-center p-1 text-center group cursor-default
-                          ${ach.unlocked
-                            ? 'bg-gradient-to-br from-gold-100 to-gold-200 shadow-sm'
-                            : 'bg-surface-200 dark:bg-surface-700'
-                          }
-                        `}
-                      >
-                        <span className={`text-xl mb-0.5 ${!ach.unlocked ? 'grayscale opacity-40' : ''}`}>
-                          {ach.icon}
-                        </span>
-                        <span className={`text-[9px] font-medium leading-tight
-                          ${ach.unlocked ? 'text-surface-700 dark:text-surface-200' : 'text-surface-400 dark:text-surface-500'}
-                        `}>
-                          {ach.name}
-                        </span>
-                        {ach.unlocked && (
-                          <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white" />
-                        )}
-                        {/* Тултип при наведении */}
+                      <motion.div key={ach.id} initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: index * 0.02 }}
+                        className={`relative aspect-square rounded-xl flex flex-col items-center justify-center p-1 text-center group cursor-default ${ach.unlocked ? 'bg-gradient-to-br from-gold-100 to-gold-200 shadow-sm' : 'bg-surface-200 dark:bg-surface-700'}`}>
+                        <span className={`text-xl mb-0.5 ${!ach.unlocked ? 'grayscale opacity-40' : ''}`}>{ach.icon}</span>
+                        <span className={`text-[9px] font-medium leading-tight ${ach.unlocked ? 'text-surface-700 dark:text-surface-200' : 'text-surface-400 dark:text-surface-500'}`}>{ach.name}</span>
+                        {ach.unlocked && <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white" />}
                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-40 px-2 py-1.5 bg-surface-800 text-white text-[10px] rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 whitespace-normal text-center">
                           {ach.description}
                         </div>
@@ -340,12 +266,8 @@ const ProfilePage: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* ===== ПРОГРЕСС ПО ЭПОХАМ ===== */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-        >
+        {/* ПРОГРЕСС ПО ЭПОХАМ */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
           <h2 className="text-lg font-bold text-surface-800 dark:text-surface-100 mb-3 flex items-center gap-2">
             <Scroll className="w-5 h-5 text-primary-500" />
             Прогресс по эпохам
@@ -358,15 +280,10 @@ const ProfilePage: React.FC = () => {
                     <span className="text-lg">{era.icon}</span>
                     <span className="text-sm font-medium text-surface-700 dark:text-surface-200">{era.name}</span>
                   </div>
-                    <span className="text-xs text-surface-400 dark:text-surface-500">
-                    {completed}/{total} &bull; {percent}%
-                  </span>
+                  <span className="text-xs text-surface-400 dark:text-surface-500">{completed}/{total} &bull; {percent}%</span>
                 </div>
                 <div className="progress-bar">
-                  <div
-                    className="progress-bar-fill"
-                    style={{ width: `${percent}%`, backgroundColor: era.color }}
-                  />
+                  <div className="progress-bar-fill" style={{ width: `${percent}%`, backgroundColor: era.color }} />
                 </div>
               </div>
             ))}

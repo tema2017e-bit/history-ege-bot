@@ -221,7 +221,7 @@ const HomePage: React.FC = () => {
         >
           <h2 className="text-lg font-bold text-surface-800 dark:text-surface-100 mb-3">Эпохи</h2>
           <div className="space-y-3">
-            {(hasSubscription ? eras : eras.slice(0, FREE_ERAS_COUNT)).map((era) => {
+            {eras.map((era) => {
               const eraLessons = era.lessonIds;
               const completedCount = eraLessons.filter(id => completedLessons.includes(id)).length;
               const status = getEraStatus(era.id);
@@ -293,11 +293,14 @@ const EraCard: React.FC<{
   const subscription = useStore(s => s.subscription);
 
   if (status === 'locked') {
+    const eraIndex = eras.findIndex(e => e.id === era.id);
+    const isPremium = eraIndex >= FREE_ERAS_COUNT;
+    
     return (
       <div className="card opacity-60 dark:bg-surface-800">
         <div className="flex items-start gap-3">
           <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 bg-surface-200 dark:bg-surface-700">
-            <Lock className="w-7 h-7 text-surface-400" />
+            {isPremium ? <Sparkles className="w-7 h-7 text-gold-500" /> : <Lock className="w-7 h-7 text-surface-400" />}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
@@ -305,11 +308,11 @@ const EraCard: React.FC<{
               <span className="text-xs text-surface-400">{era.yearRange}</span>
             </div>
             <p className="text-xs text-surface-400 mt-0.5">{era.description}</p>
-            {canDiagnostic ? (
-              <Link to={`/diagnostic/${era.id}`} className="mt-2 inline-block">
-                <div className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1 mt-2">
-                  <TestTube className="w-3 h-3" />
-                  Пройти тест для разблокировки
+            {isPremium ? (
+              <Link to="/profile" className="mt-2 inline-block">
+                <div className="bg-gold-500 text-white text-xs py-1.5 px-3 flex items-center gap-1 rounded-lg font-medium">
+                  <Sparkles className="w-3 h-3" />
+                  Оформить подписку
                 </div>
               </Link>
             ) : (

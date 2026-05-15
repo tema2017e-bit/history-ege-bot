@@ -14,6 +14,7 @@ import TheoryPage from './pages/TheoryPage';
 import DiagnosticPage from './pages/DiagnosticPage';
 import DateMemoryPage from './pages/DateMemoryPage';
 import EndlessPage from './pages/EndlessPage';
+import StatsPage from './pages/StatsPage';
 import { useStore, unlockAllEras, checkSubscriptionStatus } from './store/useStore';
 import { useTelegram } from './utils/telegram';
 
@@ -272,6 +273,14 @@ const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <SubscriptionGate><EndlessPage /></SubscriptionGate>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/stats"
+          element={
+            <ProtectedRoute>
+              <StatsPage />
             </ProtectedRoute>
           }
         />

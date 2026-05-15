@@ -349,7 +349,7 @@ const ReignsPage: React.FC = () => {
 
         {/* Кластеры */}
         <div className="space-y-3">
-          {(subscription ? reignClusters : reignClusters.slice(0, FREE_ERAS_COUNT - 1)).map((cl, index) => {
+          {reignClusters.map((cl, index) => {
             const clRulers = getRulersInCluster(cl.id);
             const isDone = completedReignTests.includes(`reign-${cl.id}`);
             const clMastery = reignMastery[cl.id] || 0;
@@ -369,7 +369,12 @@ const ReignsPage: React.FC = () => {
                         <Sparkles className="w-4 h-4 text-gold-500" />
                       </div>
                       <p className="text-xs text-surface-400 dark:text-surface-500">{clRulers.length} правителей • {cl.yearRange}</p>
-                      <p className="text-xs text-gold-500 mt-1 font-medium">Доступно по подписке</p>
+                      <Link to="/profile" className="mt-2 inline-block">
+                        <div className="bg-gold-500 text-white text-xs py-1.5 px-3 flex items-center gap-1 rounded-lg font-medium">
+                          <Sparkles className="w-3 h-3" />
+                          Оформить подписку
+                        </div>
+                      </Link>
                     </div>
                   </div>
                 </div>

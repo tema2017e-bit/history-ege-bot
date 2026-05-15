@@ -14,6 +14,74 @@ const TheoryPage: React.FC = () => {
   const subscription = useStore(s => s.subscription);
   const navigateSub = () => window.location.href = '/profile';
 
+  // Вспомогательная функция для извлечения всего текста из контента темы
+  const extractAllText = (topic: TheoryTopic): string => {
+    const parts: string[] = [];
+    
+    // Заголовок и временной диапазон
+    parts.push(topic.title);
+    if (topic.timeRange) parts.push(topic.timeRange);
+    
+    // Контент
+    if (typeof topic.content === 'string') {
+      parts.push(topic.content);
+    } else if (topic.content) {
+      const c = topic.content;
+      
+      // Текстовое содержимое
+      if (c.text) parts.push(c.text);
+      
+      // Правители
+      if (c.rulers) {
+        c.rulers.forEach(r => {
+          parts.push(r.name, r.years, r.description || '');
+        });
+      }
+      
+      // Ключевые даты
+      if (c.keyDates) {
+        c.keyDates.forEach(d => {
+          parts.push(d.year, d.event);
+        });
+      }
+      
+      // Основные события
+      if (c.events) parts.push(...c.events);
+      
+      // Итоги
+      if (c.results) parts.push(...c.results);
+      
+      // Термины
+      if (c.terms) {
+        c.terms.forEach(t => {
+          parts.push(t.term, t.definition);
+        });
+      }
+      
+      // Персоны
+      if (c.persons) {
+        c.persons.forEach(p => {
+          parts.push(p.name, p.role, p.fact);
+        });
+      }
+      
+      // Ключевые факты
+      if (c.keyFacts) parts.push(...c.keyFacts);
+      
+      // Причинно-следственные связи
+      if (c.causalLinks) {
+        c.causalLinks.forEach(cl => {
+          parts.push(cl.cause, cl.effect);
+        });
+      }
+      
+      // Фокус ЕГЭ
+      if (c.examFocus) parts.push(...c.examFocus);
+    }
+    
+    return parts.join(' ').toLowerCase();
+  };
+
   const filteredSections = useMemo(() => {
     if (!searchQuery.trim()) return theorySections;
     
@@ -22,66 +90,8 @@ const TheoryPage: React.FC = () => {
       .map(section => ({
         ...section,
         topics: section.topics.filter(topic => {
-          // Поиск по заголовку и временному диапазону
-          if (topic.title.toLowerCase().includes(q)) return true;
-          if ((topic.timeRange || '').toLowerCase().includes(q)) return true;
-          
-          // Для строкового контента — ищем по тексту
-          if (typeof topic.content === 'string') {
-            return topic.content.toLowerCase().includes(q);
-          }
-          
-          // Для структурированного контента — ищем по всем полям
-          const c = topic.content;
-          
-          // Текстовое содержимое
-          if (c.text?.toLowerCase().includes(q)) return true;
-          
-          // Правители
-          if (c.rulers?.some(r => 
-            r.name.toLowerCase().includes(q) || 
-            (r.description || '').toLowerCase().includes(q) ||
-            r.years.toLowerCase().includes(q)
-          )) return true;
-          
-          // Ключевые даты
-          if (c.keyDates?.some(d => 
-            d.year.includes(q) || 
-            d.event.toLowerCase().includes(q)
-          )) return true;
-          
-          // Основные события
-          if (c.events?.some(e => e.toLowerCase().includes(q))) return true;
-          
-          // Итоги и значение
-          if (c.results?.some(r => r.toLowerCase().includes(q))) return true;
-          
-          // Термины
-          if (c.terms?.some(t => 
-            t.term.toLowerCase().includes(q) || 
-            t.definition.toLowerCase().includes(q)
-          )) return true;
-          
-          // Исторические личности
-          if (c.persons?.some(p => 
-            p.name.toLowerCase().includes(q) || 
-            p.role.toLowerCase().includes(q) ||
-            p.fact.toLowerCase().includes(q)
-          )) return true;
-          
-          // Важные факты
-          if (c.keyFacts?.some(f => f.toLowerCase().includes(q))) return true;
-          
-          // Причинно-следственные связи
-          if (c.causalLinks?.some(cl => 
-            cl.cause.toLowerCase().includes(q) || 
-            cl.effect.toLowerCase().includes(q)
-          )) return true;
-          
-          // Фокус ЕГЭ
-          if (c.examFocus?.some(f => f.toLowerCase().includes(q))) return true;
-          
-          return false;
+          const allText = extractAllText(topic);
+          return allText.includes(q);
         }),
       }))
       .filter(section => section.topics.length > 0);

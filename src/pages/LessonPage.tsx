@@ -133,7 +133,6 @@ const LessonPage: React.FC = () => {
       try {
         const correctGroups = currentQuestion.groupAnswer || {};
         const userGroups = JSON.parse(answer);
-        // Сравниваем с сортировкой массивов, чтобы порядок элементов не влиял
         const normalizeGroups = (groups: Record<string, string[]>) => {
           const result: Record<string, string[]> = {};
           for (const key of Object.keys(groups).sort()) {
@@ -155,11 +154,29 @@ const LessonPage: React.FC = () => {
       } catch {
         correct = false;
       }
-    } else if (currentQuestion.type === 'input-year' || currentQuestion.type === 'fill-blank') {
-      // fill-blank ДОЛЖЕН проверяться ДО isTextQuestion, т.к. isTextQuestion тоже возвращает true для fill-blank
+    } else if (currentQuestion.type === 'input-year') {
+      // Строгая проверка года
       const userYear = normalizeYearAnswer(answer);
       const correctYear = normalizeYearAnswer(currentQuestion.correctAnswer as string);
       correct = userYear === correctYear;
+    } else if (currentQuestion.type === 'fill-blank' || currentQuestion.type === 'missing-word') {
+      // fill-blank и missing-word могут быть как годовыми, так и текстовыми
+      // Определяем по inputMode вопроса
+      const qInputMode = currentQuestion.inputMode || 'text';
+      if (qInputMode === 'year') {
+        // Проверка года
+        const userYear = normalizeYearAnswer(answer);
+        const correctYear = normalizeYearAnswer(currentQuestion.correctAnswer as string);
+        correct = userYear === correctYear;
+      } else {
+        // Текстовая проверка
+        correct = checkTextAnswer(
+          answer,
+          currentQuestion.correctAnswer as string,
+          currentQuestion.acceptableAnswers,
+          currentQuestion.aliases
+        );
+      }
     } else if (isTextQuestion(currentQuestion.type)) {
       correct = checkTextAnswer(
         answer,
@@ -428,8 +445,8 @@ const LessonPage: React.FC = () => {
               correctAnswer={currentQuestion.correctAnswer as string}
               showResult={showResult}
               disabled={false}
-              inputMode="text"
-              placeholder="Введите слово..."
+              inputMode={currentQuestion.inputMode || 'text'}
+              placeholder={currentQuestion.inputMode === 'year' ? 'Введите год...' : 'Введите слово...'}
             />
           ) : questionType === 'grouping' && currentQuestion.categories && currentQuestion.groupItems ? (
             <GroupingTask

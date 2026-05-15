@@ -199,12 +199,25 @@ export function isYearQuestion(type: string): boolean {
  * - убирает пробелы
  * - убирает лидирующие нули
  * - заменяет тире (–, —) на обычный дефис (-)
+ * - убирает все нецифровые символы кроме дефиса
+ * - нормализует диапазоны: "1700-1721" и "1700–1721" → одинаковый результат
  */
 export function normalizeYearAnswer(yearStr: string): string {
-  return yearStr
+  // Сначала нормализуем тире и убираем пробелы
+  const normalized = yearStr
     .trim()
     .replace(/\s+/g, '')
-    .replace(/^0+/, '')
     .replace(/[–—]/g, '-')
-    .replace(/[^0-9\-]/g, '');  // Убираем ВСЕ нецифровые символы (точки, буквы, знаки препинания и т.д.), кроме дефиса
+    .replace(/[^0-9\-]/g, '');
+  
+  // Убираем лидирующие нули из каждого года в диапазоне
+  // Например: "0862-0879" → "862-879"
+  const parts = normalized.split('-');
+  const cleanedParts = parts.map(part => {
+    // Убираем лидирующие нули, но оставляем хотя бы одну цифру
+    const cleaned = part.replace(/^0+/, '') || '0';
+    return cleaned;
+  });
+  
+  return cleanedParts.join('-');
 }

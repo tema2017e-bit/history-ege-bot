@@ -74,30 +74,50 @@ function generateWhoRuledInYear(clusterRulers: Ruler[]): Question | null {
 }
 
 // === Тип 2: Кто правил в этот ПЕРИОД? (выбери по диапазону лет) ===
-// НЕ показываем годы правления в вопросе — только ключевые события
+// Два варианта: по годам правления и по ключевым событиям
 function generateWhoRuledInPeriod(clusterRulers: Ruler[]): Question | null {
-  // Выбираем правителя с ключевыми событиями
-  const withEvents = clusterRulers.filter(r => r.keyEvents.length > 0);
-  if (withEvents.length < 2) return null;
-  
-  const ruler = withEvents[Math.floor(Math.random() * withEvents.length)];
+  const ruler = clusterRulers[Math.floor(Math.random() * clusterRulers.length)];
   const distractors = getDistractors(ruler, clusterRulers, 3);
   if (distractors.length < 2) return null;
 
   const options = shuffle([ruler.name, ...distractors.slice(0, 3).map(d => d.name)]);
-  
-  // Берём 1-2 ключевых события как подсказку (без указания лет)
-  const eventHints = ruler.keyEvents.slice(0, 2);
 
-  return {
-    id: `q-who-ruled-period-${ruler.id}-${Date.now()}`,
-    type: 'select-date' as any,
-    cardId: `reign-${ruler.id}`,
-    prompt: `Кто правил в период, когда: ${eventHints.join('; ')}?`,
-    correctAnswer: ruler.name,
-    options,
-    explanation: `${ruler.name} (${ruler.startYear}–${ruler.endYear || 'наст. время'}). ${ruler.keyEvents.slice(0, 2).join('; ')}.`,
-  };
+  // 50/50: вопрос по годам правления или по ключевым событиям
+  const useYears = Math.random() > 0.5;
+
+  if (useYears) {
+    // Вариант 1: "Кто правил в 1682–1725 годах?" — развивает хронологическое мышление
+    return {
+      id: `q-who-ruled-period-${ruler.id}-${Date.now()}`,
+      type: 'select-date' as any,
+      cardId: `reign-${ruler.id}`,
+      prompt: `Кто правил в ${ruler.startYear}–${ruler.endYear || 'наст. время'} годах?`,
+      correctAnswer: ruler.name,
+      options,
+      explanation: `${ruler.name} (${ruler.startYear}–${ruler.endYear || 'наст. время'}). ${ruler.keyEvents.slice(0, 2).join('; ')}.`,
+    };
+  } else {
+    // Вариант 2: "Кто правил в период, когда: Северная война, Основание Петербурга?"
+    const withEvents = clusterRulers.filter(r => r.keyEvents.length > 0);
+    if (withEvents.length < 2) return null;
+    
+    const eventRuler = withEvents[Math.floor(Math.random() * withEvents.length)];
+    const eventDistractors = getDistractors(eventRuler, clusterRulers, 3);
+    if (eventDistractors.length < 2) return null;
+    
+    const eventOptions = shuffle([eventRuler.name, ...eventDistractors.slice(0, 3).map(d => d.name)]);
+    const eventHints = eventRuler.keyEvents.slice(0, 2);
+
+    return {
+      id: `q-who-ruled-events-${eventRuler.id}-${Date.now()}`,
+      type: 'select-date' as any,
+      cardId: `reign-${eventRuler.id}`,
+      prompt: `Кто правил в период, когда: ${eventHints.join('; ')}?`,
+      correctAnswer: eventRuler.name,
+      options: eventOptions,
+      explanation: `${eventRuler.name} (${eventRuler.startYear}–${eventRuler.endYear || 'наст. время'}). ${eventRuler.keyEvents.slice(0, 2).join('; ')}.`,
+    };
+  }
 }
 
 // === Тип 3: Выбери годы правления по имени правителя ===

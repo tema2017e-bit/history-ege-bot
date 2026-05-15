@@ -261,20 +261,42 @@ function generateInputTextQuestion(card: HistoryCard, allCards: HistoryCard[]): 
   const { fullRange } = parseYearInfo(card.year);
   const eraContext = getEraContext(card.era);
   const hasRuler = !!card.ruler;
-  const prompts: string[] = [];
+  
+  // Варианты вопросов, где ответ НЕ содержится в тексте
+  const questionVariants: { prompt: string; answer: string }[] = [];
 
   if (hasRuler) {
-    prompts.push(`Введите имя правителя, при котором произошло: «${card.event}»`);
-  } else {
-    prompts.push(`Введите название события, которое произошло в ${fullRange} году`);
+    // Спрашиваем правителя по событию (событие указано, правитель — нет)
+    questionVariants.push({
+      prompt: `Введите имя правителя, при котором произошло: «${card.event}»`,
+      answer: card.ruler!,
+    });
+    questionVariants.push({
+      prompt: `При каком правителе произошло событие: «${card.event}»?`,
+      answer: card.ruler!,
+    });
   }
+  
+  // Спрашиваем событие по году и контексту (без указания самого события)
+  questionVariants.push({
+    prompt: `Какое событие произошло в ${fullRange} году? (Эпоха: ${eraContext.name})`,
+    answer: card.event,
+  });
+  
+  // Спрашиваем год по событию
+  questionVariants.push({
+    prompt: `В каком году произошло: «${card.event}»?`,
+    answer: fullRange,
+  });
 
-  const prompt = prompts[Math.floor(Math.random() * prompts.length)];
-  const correctAnswer = card.ruler || card.event;
+  const selected = questionVariants[Math.floor(Math.random() * questionVariants.length)];
+  const correctAnswer = selected.answer;
+  
   let acceptableAnswers: string[] = [];
   let aliases: string[] = [];
 
-  if (card.ruler) {
+  // Если ответ — правитель, добавляем варианты написания
+  if (card.ruler && correctAnswer === card.ruler) {
     const rulerData = getRulerAcceptableAnswers(card.ruler);
     acceptableAnswers = rulerData.acceptableAnswers;
     aliases = rulerData.aliases;
@@ -284,7 +306,7 @@ function generateInputTextQuestion(card: HistoryCard, allCards: HistoryCard[]): 
     id: `q-${card.id}-text-${Date.now()}`,
     type: 'input-text' as QuestionType,
     cardId: card.id,
-    prompt,
+    prompt: selected.prompt,
     correctAnswer,
     explanation: `${card.event}. ${fullRange} год. ${eraContext.name}${card.ruler ? `. Правитель: ${card.ruler}` : ''}`,
     inputMode: 'text',
@@ -587,25 +609,51 @@ function generateGroupingQuestion(card: HistoryCard, allCards: HistoryCard[]): Q
 
 function generateMissingWordQuestion(card: HistoryCard): Question {
   const { fullRange } = parseYearInfo(card.year);
-  // Формируем предложение с пропуском ключевого слова (не года)
-  const templates = [
-    { template: `Событие «____» произошло в ${fullRange} году.`, answer: card.event },
-    { template: `В ${fullRange} году произошло «____».`, answer: card.event },
-  ];
+  
+  // Используем контекст эпохи и правителя, чтобы не дать ответ в вопросе
+  const eraContext = getEraContext(card.era);
+  
+  // Шаблоны, где ответ НЕ содержится в тексте вопроса
+  const templates: { prompt: string; answer: string }[] = [];
+  
+  // Если есть правитель — спрашиваем правителя по событию
+  if (card.ruler) {
+    templates.push({
+      prompt: `Какой правитель был при событии «${card.event}»?`,
+      answer: card.ruler,
+    });
+    templates.push({
+      prompt: `При каком правителе произошло: «${card.event}»?`,
+      answer: card.ruler,
+    });
+  }
+  
+  // Спрашиваем событие по году и эпохе (без указания самого события)
+  templates.push({
+    prompt: `Какое событие произошло в ${fullRange} году в эпоху «${eraContext.name}»?`,
+    answer: card.event,
+  });
+  
+  // Спрашиваем год по событию
+  templates.push({
+    prompt: `В каком году произошло: «${card.event}»?`,
+    answer: fullRange,
+  });
+  
   const selected = templates[Math.floor(Math.random() * templates.length)];
-
-  const missingWord = card.ruler || card.event;
-  const prompt = selected.template.replace('____', '______');
-  const hintWord = selected.answer;
+  
+  // Определяем inputMode в зависимости от типа ответа
+  const isYearAnswer = /^\d/.test(selected.answer) || /^\d{4}/.test(selected.answer);
+  const inputMode = isYearAnswer ? 'year' : 'text';
 
   return {
     id: `q-${card.id}-missing-${Date.now()}`,
     type: 'missing-word',
     cardId: card.id,
-    prompt: `Вставьте пропущенное слово:\n\n«${prompt}»`,
-    correctAnswer: hintWord,
-    explanation: `Правильный ответ: «${hintWord}». ${card.event}, ${fullRange} год.`,
-    inputMode: 'text',
+    prompt: `Вставьте пропущенное слово:\n\n«${selected.prompt}»`,
+    correctAnswer: selected.answer,
+    explanation: `${card.event} — ${fullRange} год, эпоха «${eraContext.name}».${card.ruler ? ` Правитель: ${card.ruler}.` : ''}`,
+    inputMode,
   };
 }
 
@@ -653,44 +701,57 @@ function generateMultipleCorrectQuestion(card: HistoryCard, allCards: HistoryCar
 }
 
 // ==================== NEW: DIALOG CARD (flip-карточка) ====================
+// Упрощённый вопрос с выбором из 4 вариантов (вместо "знаю/не знаю")
 
 function generateDialogCardQuestion(card: HistoryCard, allCards: HistoryCard[]): Question {
   const { fullRange } = parseYearInfo(card.year);
   const eraContext = getEraContext(card.era);
 
-  // 50/50: дата→событие или термин→определение
+  // Генерируем дистракторов из той же эпохи
+  const sameEraCards = allCards.filter(c => c.era === card.era && c.id !== card.id);
+  const distractors = shuffle(sameEraCards).slice(0, 3).map(c => c.event);
+  
+  // Если мало дистракторов — берём из соседних эпох
+  if (distractors.length < 3) {
+    const currentEraIndex = eras.findIndex(e => e.id === card.era);
+    const adjacentEraIds: string[] = [];
+    if (currentEraIndex > 0) adjacentEraIds.push(eras[currentEraIndex - 1].id);
+    if (currentEraIndex < eras.length - 1) adjacentEraIds.push(eras[currentEraIndex + 1].id);
+    const adjacentCards = allCards.filter(c => adjacentEraIds.includes(c.era) && c.id !== card.id);
+    const extra = shuffle(adjacentCards).slice(0, 3 - distractors.length).map(c => c.event);
+    distractors.push(...extra);
+  }
+  
+  const options = shuffle([card.event, ...distractors.slice(0, 3)]);
+
+  // 50/50: дата→событие или событие→дата
   const isDateToEvent = Math.random() > 0.5;
 
   if (isDateToEvent) {
     return {
       id: `q-${card.id}-dialog-${Date.now()}`,
-      type: 'dialog-card',
+      type: 'select-event',
       cardId: card.id,
-      prompt: `Запомните: ${fullRange} год`,
+      prompt: `Какое событие произошло в ${fullRange} году?`,
       correctAnswer: card.event,
+      options,
       explanation: `${card.event} — ${fullRange} год, ${eraContext.name}.`,
     };
   }
 
-  // Терминальная версия: если есть ruler → вопрос по правителю
-  if (card.ruler) {
-    return {
-      id: `q-${card.id}-dialog-${Date.now()}`,
-      type: 'dialog-card',
-      cardId: card.id,
-      prompt: `Запомните правителя эпохи «${eraContext.name}»`,
-      correctAnswer: card.ruler,
-      explanation: `${card.ruler} — правитель эпохи ${eraContext.name}. ${card.event} (${fullRange}).`,
-    };
-  }
+  // Событие → дата
+  const dateOptions = shuffle([fullRange, ...distractors.slice(0, 3).map(() => {
+    const wrongCard = sameEraCards[Math.floor(Math.random() * sameEraCards.length)];
+    return wrongCard ? parseYearInfo(wrongCard.year).fullRange : fullRange;
+  })]);
 
-  // fallback: дата→событие
   return {
     id: `q-${card.id}-dialog-${Date.now()}`,
-    type: 'dialog-card',
+    type: 'select-date',
     cardId: card.id,
-    prompt: `Запомните: ${fullRange} год`,
-    correctAnswer: card.event,
+    prompt: `В каком году произошло: «${card.event}»?`,
+    correctAnswer: fullRange,
+    options: dateOptions,
     explanation: `${card.event} — ${fullRange} год, ${eraContext.name}.`,
   };
 }

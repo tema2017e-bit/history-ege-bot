@@ -52,7 +52,10 @@ function getDistractors(targetRuler: Ruler, clusterRulers: Ruler[], count: numbe
 // Не показываем годы правления в вариантах — только имена
 function generateWhoRuledInYear(clusterRulers: Ruler[]): Question | null {
   const ruler = clusterRulers[Math.floor(Math.random() * clusterRulers.length)];
-  const year = ruler.startYear + Math.floor(Math.random() * Math.max(1, ruler.endYear - ruler.startYear));
+  
+  // Безопасное вычисление года (учитываем endYear = null для нынешних правителей)
+  const endYear = ruler.endYear ?? ruler.startYear + 20; // Если endYear null, используем startYear + 20
+  const year = ruler.startYear + Math.floor(Math.random() * Math.max(1, endYear - ruler.startYear));
 
   const distractors = getDistractors(ruler, clusterRulers, 3);
   if (distractors.length < 2) return null;
@@ -71,18 +74,26 @@ function generateWhoRuledInYear(clusterRulers: Ruler[]): Question | null {
 }
 
 // === Тип 2: Кто правил в этот ПЕРИОД? (выбери по диапазону лет) ===
+// НЕ показываем годы правления в вопросе — только ключевые события
 function generateWhoRuledInPeriod(clusterRulers: Ruler[]): Question | null {
-  const ruler = clusterRulers[Math.floor(Math.random() * clusterRulers.length)];
+  // Выбираем правителя с ключевыми событиями
+  const withEvents = clusterRulers.filter(r => r.keyEvents.length > 0);
+  if (withEvents.length < 2) return null;
+  
+  const ruler = withEvents[Math.floor(Math.random() * withEvents.length)];
   const distractors = getDistractors(ruler, clusterRulers, 3);
   if (distractors.length < 2) return null;
 
   const options = shuffle([ruler.name, ...distractors.slice(0, 3).map(d => d.name)]);
+  
+  // Берём 1-2 ключевых события как подсказку (без указания лет)
+  const eventHints = ruler.keyEvents.slice(0, 2);
 
   return {
     id: `q-who-ruled-period-${ruler.id}-${Date.now()}`,
     type: 'select-date' as any,
     cardId: `reign-${ruler.id}`,
-    prompt: `Кто правил в ${ruler.startYear}–${ruler.endYear || 'наст. время'} годах?`,
+    prompt: `Кто правил в период, когда: ${eventHints.join('; ')}?`,
     correctAnswer: ruler.name,
     options,
     explanation: `${ruler.name} (${ruler.startYear}–${ruler.endYear || 'наст. время'}). ${ruler.keyEvents.slice(0, 2).join('; ')}.`,

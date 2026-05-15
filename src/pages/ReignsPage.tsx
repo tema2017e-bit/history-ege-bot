@@ -68,12 +68,21 @@ const ReignsPage: React.FC = () => {
     
     const q = questions[currentIndex];
     let correct: boolean;
-    if (isTextQuestion(q.type)) {
-      correct = checkTextAnswer(answer, q.correctAnswer as string, q.acceptableAnswers, q.aliases);
-    } else if (q.type === 'input-year' || q.type === 'fill-blank') {
+    if (q.type === 'input-year') {
       const userYear = normalizeYearAnswer(answer);
       const correctYear = normalizeYearAnswer(q.correctAnswer as string);
       correct = userYear === correctYear;
+    } else if (q.type === 'fill-blank' || q.type === 'missing-word') {
+      const qInputMode = (q as any).inputMode || 'text';
+      if (qInputMode === 'year') {
+        const userYear = normalizeYearAnswer(answer);
+        const correctYear = normalizeYearAnswer(q.correctAnswer as string);
+        correct = userYear === correctYear;
+      } else {
+        correct = checkTextAnswer(answer, q.correctAnswer as string, q.acceptableAnswers, q.aliases);
+      }
+    } else if (isTextQuestion(q.type)) {
+      correct = checkTextAnswer(answer, q.correctAnswer as string, q.acceptableAnswers, q.aliases);
     } else {
       correct = answer === q.correctAnswer;
     }

@@ -104,10 +104,25 @@ const ReviewPage: React.FC = () => {
         currentQuestion.acceptableAnswers,
         currentQuestion.aliases
       );
-    } else if (currentQuestion.type === 'input-year' || currentQuestion.type === 'fill-blank') {
+    } else if (currentQuestion.type === 'input-year') {
       const userYear = normalizeYearAnswer(answer);
       const correctYear = normalizeYearAnswer(currentQuestion.correctAnswer as string);
       isAnswerCorrect = userYear === correctYear;
+    } else if (currentQuestion.type === 'fill-blank' || currentQuestion.type === 'missing-word') {
+      // Определяем по inputMode вопроса
+      const qInputMode = (currentQuestion as any).inputMode || 'text';
+      if (qInputMode === 'year') {
+        const userYear = normalizeYearAnswer(answer);
+        const correctYear = normalizeYearAnswer(currentQuestion.correctAnswer as string);
+        isAnswerCorrect = userYear === correctYear;
+      } else {
+        isAnswerCorrect = checkTextAnswer(
+          answer,
+          currentQuestion.correctAnswer as string,
+          currentQuestion.acceptableAnswers,
+          currentQuestion.aliases
+        );
+      }
     } else {
       isAnswerCorrect = answer.trim().toLowerCase() === currentQuestion.correctAnswer.toString().trim().toLowerCase();
     }

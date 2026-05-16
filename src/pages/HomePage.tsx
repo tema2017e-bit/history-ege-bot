@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, History, Heart, Clock, Zap, Crown, Lock, CheckCircle, TestTube, Swords, BookOpen, Brain, Star, Sparkles } from 'lucide-react';
+import { RefreshCw, History, Heart, Clock, Zap, Crown, Lock, CheckCircle, TestTube, Swords, BookOpen, Brain, Star, Sparkles, Target, Calendar } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TopBar, DailyGoalBar } from '../components/ui/TopBar';
 import { useStore, FREE_ERAS_COUNT } from '../store/useStore';
@@ -24,6 +24,23 @@ const HomePage: React.FC = () => {
   } = useStore();
 
   const hasSubscription = subscription || unlockedAllByAdmin;
+  const [dateOnlyFilter, setDateOnlyFilter] = useState(false);
+
+  // Функция проверки, есть ли в уроке карточки с датами
+  const hasDateCards = useMemo(() => {
+    const cache: Record<string, boolean> = {};
+    return (lessonId: string): boolean => {
+      if (cache[lessonId] !== undefined) return cache[lessonId];
+      const lesson = lessons.find(l => l.id === lessonId);
+      if (!lesson) return false;
+      const hasDate = lesson.cardIds.some(cardId => {
+        const card = historyCards.find(c => c.id === cardId);
+        return card && /\d/.test(card.year);
+      });
+      cache[lessonId] = hasDate;
+      return hasDate;
+    };
+  }, []);
 
   // Определяем текущий урок (первый незавершённый из разблокированных)
   const currentLesson = unlockedLessons.find(id => !completedLessons.includes(id)) || null;
@@ -219,7 +236,20 @@ const HomePage: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
         >
-          <h2 className="text-lg font-bold text-surface-800 dark:text-surface-100 mb-3">Эпохи</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-bold text-surface-800 dark:text-surface-100">Эпохи</h2>
+            <button
+              onClick={() => setDateOnlyFilter(!dateOnlyFilter)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                dateOnlyFilter
+                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                  : 'bg-surface-100 text-surface-500 dark:bg-surface-800 dark:text-surface-400'
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              {dateOnlyFilter ? '📅 Только даты' : 'Все уроки'}
+            </button>
+          </div>
           <div className="space-y-3">
             {eras.map((era) => {
               const eraLessons = era.lessonIds;
@@ -234,6 +264,10 @@ const HomePage: React.FC = () => {
                   status={status}
                   completedCount={completedCount}
                   canDiagnostic={canDiagnostic}
+                  dateOnlyFilter={dateOnlyFilter}
+                  hasDateCards={hasDateCards}
+                  completedLessons={completedLessons}
+                  unlockedLessons={unlockedLessons}
                 />
               );
             })}
@@ -250,7 +284,11 @@ const EraCard: React.FC<{
   status: 'unlocked' | 'locked' | 'completed';
   completedCount: number;
   canDiagnostic: boolean;
-}> = ({ era, status, completedCount, canDiagnostic }) => {
+  dateOnlyFilter: boolean;
+  hasDateCards: (lessonId: string) => boolean;
+  completedLessons: string[];
+  unlockedLessons: string[];
+}> = ({ era, status, completedCount, canDiagnostic, dateOnlyFilter, hasDateCards, completedLessons, unlockedLessons }) => {
   const eraLessons = era.lessonIds;
   const progressPercent = eraLessons.length > 0 ? Math.round((completedCount / eraLessons.length) * 100) : 0;
 
@@ -324,10 +362,14 @@ const EraCard: React.FC<{
     );
   }
 
-  // unlocked
+  // unlocked — показываем уроки с фильтрацией
+  const filteredLessons = dateOnlyFilter
+    ? eraLessons.filter(id => hasDateCards(id))
+    : eraLessons;
+
   return (
-    <Link to={`/era/${era.id}`}>
-      <div className="card card-hover dark:bg-surface-800">
+    <div className="card dark:bg-surface-800">
+      <Link to={`/era/${era.id}`}>
         <div className="flex items-start gap-3">
           <div
             className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
@@ -358,8 +400,64 @@ const EraCard: React.FC<{
             </div>
           </div>
         </div>
-      </div>
-    </Link>
+      </Link>
+      
+      {/* Список уроков с фильтрацией по датам */}
+      {dateOnlyFilter && filteredLessons.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-surface-100 dark:border-surface-700">
+          <p className="text-xs text-amber-600 dark:text-amber-400 mb-2 font-medium">📅 Уроки с датами:</p>
+          <div className="space-y-1.5">
+            {filteredLessons.map(lessonId => {
+              const lesson = lessons.find(l => l.id === lessonId);
+              if (!lesson) return null;
+              const isCompleted = completedLessons.includes(lessonId);
+              const isUnlocked = unlockedLessons.includes(lessonId);
+              
+              return (
+                <Link
+                  key={lessonId}
+                  to={isUnlocked ? `/lesson/${lessonId}` : '#'}
+                  className={`flex items-center gap-2 p-2 rounded-lg text-sm transition-colors ${
+                    isCompleted
+                      ? 'bg-green-50 dark:bg-green-900/20'
+                      : isUnlocked
+                        ? 'bg-surface-50 hover:bg-surface-100 dark:bg-surface-800 dark:hover:bg-surface-700'
+                        : 'opacity-50 cursor-not-allowed'
+                  }`}
+                  onClick={!isUnlocked ? (e) => e.preventDefault() : undefined}
+                >
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs flex-shrink-0 ${
+                    isCompleted
+                      ? 'bg-green-500 text-white'
+                      : isUnlocked
+                        ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
+                        : 'bg-surface-200 text-surface-400 dark:bg-surface-700'
+                  }`}>
+                    {isCompleted ? '✓' : isUnlocked ? '📅' : '🔒'}
+                  </span>
+                  <span className={`flex-1 truncate ${
+                    isCompleted
+                      ? 'text-green-700 dark:text-green-400'
+                      : isUnlocked
+                        ? 'text-surface-700 dark:text-surface-200'
+                        : 'text-surface-400'
+                  }`}>
+                    {lesson.title}
+                  </span>
+                  <span className="text-xs text-surface-400">{lesson.xpReward} XP</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      
+      {dateOnlyFilter && filteredLessons.length === 0 && (
+        <div className="mt-3 pt-3 border-t border-surface-100 dark:border-surface-700">
+          <p className="text-xs text-surface-400 text-center py-2">Нет уроков с датами в этой эпохе</p>
+        </div>
+      )}
+    </div>
   );
 };
 

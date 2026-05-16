@@ -6,6 +6,32 @@ import { useStore, FREE_ERAS_COUNT } from '../store/useStore';
 import { theorySections } from '../data/theoryData';
 import type { TheoryTopic } from '../types';
 
+// Вспомогательная функция для извлечения всего текста из контента темы
+function extractAllText(topic: TheoryTopic): string {
+  const parts: string[] = [];
+  
+  parts.push(topic.title);
+  if (topic.timeRange) parts.push(topic.timeRange);
+  
+  if (typeof topic.content === 'string') {
+    parts.push(topic.content);
+  } else if (topic.content) {
+    const c = topic.content;
+    if (c.text) parts.push(c.text);
+    if (c.rulers) c.rulers.forEach(r => parts.push(r.name, r.years, r.description || ''));
+    if (c.keyDates) c.keyDates.forEach(d => parts.push(d.year, d.event));
+    if (c.events) parts.push(...c.events);
+    if (c.results) parts.push(...c.results);
+    if (c.terms) c.terms.forEach(t => parts.push(t.term, t.definition));
+    if (c.persons) c.persons.forEach(p => parts.push(p.name, p.role, p.fact));
+    if (c.keyFacts) parts.push(...c.keyFacts);
+    if (c.causalLinks) c.causalLinks.forEach(cl => parts.push(cl.cause, cl.effect));
+    if (c.examFocus) parts.push(...c.examFocus);
+  }
+  
+  return parts.join(' ').toLowerCase();
+}
+
 const TheoryPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedTopics, setExpandedTopics] = useState<Set<string>>(new Set());
@@ -14,74 +40,6 @@ const TheoryPage: React.FC = () => {
   const subscription = useStore(s => s.subscription);
   const navigateSub = () => window.location.href = '/profile';
 
-  // Вспомогательная функция для извлечения всего текста из контента темы
-  const extractAllText = (topic: TheoryTopic): string => {
-    const parts: string[] = [];
-    
-    // Заголовок и временной диапазон
-    parts.push(topic.title);
-    if (topic.timeRange) parts.push(topic.timeRange);
-    
-    // Контент
-    if (typeof topic.content === 'string') {
-      parts.push(topic.content);
-    } else if (topic.content) {
-      const c = topic.content;
-      
-      // Текстовое содержимое
-      if (c.text) parts.push(c.text);
-      
-      // Правители
-      if (c.rulers) {
-        c.rulers.forEach(r => {
-          parts.push(r.name, r.years, r.description || '');
-        });
-      }
-      
-      // Ключевые даты
-      if (c.keyDates) {
-        c.keyDates.forEach(d => {
-          parts.push(d.year, d.event);
-        });
-      }
-      
-      // Основные события
-      if (c.events) parts.push(...c.events);
-      
-      // Итоги
-      if (c.results) parts.push(...c.results);
-      
-      // Термины
-      if (c.terms) {
-        c.terms.forEach(t => {
-          parts.push(t.term, t.definition);
-        });
-      }
-      
-      // Персоны
-      if (c.persons) {
-        c.persons.forEach(p => {
-          parts.push(p.name, p.role, p.fact);
-        });
-      }
-      
-      // Ключевые факты
-      if (c.keyFacts) parts.push(...c.keyFacts);
-      
-      // Причинно-следственные связи
-      if (c.causalLinks) {
-        c.causalLinks.forEach(cl => {
-          parts.push(cl.cause, cl.effect);
-        });
-      }
-      
-      // Фокус ЕГЭ
-      if (c.examFocus) parts.push(...c.examFocus);
-    }
-    
-    return parts.join(' ').toLowerCase();
-  };
-
   const filteredSections = useMemo(() => {
     if (!searchQuery.trim()) return theorySections;
     
@@ -89,10 +47,7 @@ const TheoryPage: React.FC = () => {
     return theorySections
       .map(section => ({
         ...section,
-        topics: section.topics.filter(topic => {
-          const allText = extractAllText(topic);
-          return allText.includes(q);
-        }),
+        topics: section.topics.filter(topic => extractAllText(topic).includes(q)),
       }))
       .filter(section => section.topics.length > 0);
   }, [searchQuery]);

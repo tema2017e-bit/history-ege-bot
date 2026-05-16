@@ -44,12 +44,19 @@ const TheoryPage: React.FC = () => {
     if (!searchQuery.trim()) return theorySections;
     
     const q = searchQuery.toLowerCase();
-    return theorySections
+    const result = theorySections
       .map(section => ({
         ...section,
-        topics: section.topics.filter(topic => extractAllText(topic).includes(q)),
+        topics: section.topics.filter(topic => {
+          const text = extractAllText(topic);
+          const found = text.includes(q);
+          if (found) console.log('FOUND:', q, 'in', topic.title);
+          return found;
+        }),
       }))
       .filter(section => section.topics.length > 0);
+    
+    return result;
   }, [searchQuery]);
 
   // Автоматически раскрываем секции при поиске
